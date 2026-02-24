@@ -1,0 +1,7 @@
+{
+  "name": "PoupeRota Pro",
+  "description": "Master route optimization and delivery management system with real-time GPS tracking and spreadsheet import.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
