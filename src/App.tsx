@@ -18,6 +18,7 @@ import {
   Navigation, 
   CheckCircle2, 
   RotateCcw,
+  Plus,
   MapPin,
   ChevronUp,
   ChevronDown,
@@ -32,7 +33,10 @@ import {
   AlertTriangle,
   CheckCircle,
   Info,
-  Search
+  Search,
+  Languages,
+  Footprints,
+  Car
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -55,6 +59,7 @@ interface Delivery {
   condoName?: string;
   quality?: 'perfect' | 'incomplete' | 'warning';
   verificationNotes?: string[];
+  notes?: string;
 }
 
 interface Location {
@@ -77,6 +82,162 @@ export default function App() {
   const [navTarget, setNavTarget] = useState<Delivery | null>(null);
   const [editingDelivery, setEditingDelivery] = useState<Delivery | null>(null);
   const [orsKey, setOrsKey] = useState<string>('');
+  const [language, setLanguage] = useState<'pt' | 'en'>('pt');
+  const [movingMarkerId, setMovingMarkerId] = useState<number | null>(null);
+  const [startFromLastDone, setStartFromLastDone] = useState(false);
+  const [isInternalNavigating, setIsInternalNavigating] = useState(false);
+  const [navRouteGeometry, setNavRouteGeometry] = useState<any>(null);
+  const [navProfile, setNavProfile] = useState<'driving-car' | 'foot-walking'>('driving-car');
+  const [routeName, setRouteName] = useState<string>(() => {
+    const d = new Date();
+    const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+    return `Rota dia ${d.getDate().toString().padStart(2, '0')} de ${months[d.getMonth()]}`;
+  });
+
+  const translations = {
+    pt: {
+      appTitle: "RouteMaster",
+      upgrade: "Upgrade Agora",
+      adText: "Remova anúncios e tenha rotas ilimitadas com o RouteMaster PRO!",
+      noRoute: "Nenhuma rota ativa",
+      importPlanilha: "Importe uma planilha Excel (.xlsx) para começar a otimizar suas entregas.",
+      importBtn: "📂 IMPORTAR PLANILHA",
+      totalStops: "Total de Paradas",
+      totalDeliveries: "Total de Entregas",
+      pending: "Pendentes",
+      recalculate: "Recalcular",
+      settings: "Configurações",
+      subscription: "Assinatura",
+      general: "Geral",
+      theme: "Tema",
+      dark: "Escuro",
+      light: "Claro",
+      language: "Idioma",
+      advanced: "Otimização Avançada",
+      orsKey: "Chave OpenRouteService (Opcional)",
+      orsPlaceholder: "Insira sua chave API",
+      orsNote: "Necessário para Map Matching e Matriz de Distância real.",
+      fixPoints: "Corrigir Pontos (Map Matching)",
+      data: "Dados",
+      clearRoute: "Limpar Rota Atual",
+      endRoute: "Encerrar Rota",
+      newRoute: "Nova Rota",
+      navigate: "Navegar para",
+      editAddress: "Editar Endereço",
+      nameLocal: "Nome / Local",
+      fullAddress: "Endereço Completo",
+      alignRoad: "Alinhar à Via",
+      neighborhood: "Bairro",
+      packages: "Qtd. Pacotes",
+      save: "Salvar Alterações",
+      startFromLastDone: "Partir da última entrega concluída",
+      refinedSearch: "Busca Refinada (ORS)",
+      searching: "Buscando...",
+      found: "Localização atualizada!",
+      notFound: "Endereço não encontrado no ORS.",
+      groupHere: "AGRUPAR AQUI",
+      inAppNav: "Navegar no App",
+      exitNav: "Sair da Navegação",
+      nextStop: "Próxima Parada",
+      distance: "Distância",
+      arrived: "Chegou!",
+      walking: "A Pé",
+      driving: "Carro",
+      suggestWalking: "Próximo! Sugerimos ir a pé.",
+      routeNameLabel: "Nome da Rota",
+      routeNamePlaceholder: "Ex: Rota dia 09 - Senador Canedo",
+      confirmMove: "Deseja alterar a posição deste pino?",
+      moveInstructions: "O pino foi desbloqueado. Agora você pode arrastá-lo para a nova posição.",
+      unlockMove: "Sim, Alterar Posição",
+      perfectAddr: "Endereço Completo",
+      incompleteAddr: "Endereço Incompleto",
+      verifyAddr: "Verificar Endereço",
+      adLabel: "Anúncio",
+      proUser: "Você é PRO",
+      changePro: "Mudar para PRO",
+      observations: "Observações",
+      obsPlaceholder: "Ex: Entregar na portaria, campainha estragada...",
+      successPoints: "Sucesso! {count} pontos corrigidos.\nDistância média de correção: {dist}m",
+      errorMapMatching: "Erro ao processar Map Matching. Verifique sua chave API.",
+      enterOrsKey: "Por favor, insira uma chave API do OpenRouteService primeiro.",
+      confirmClear: "Tem certeza que deseja limpar todos os dados da rota?",
+      emptySheet: "A planilha parece estar vazia.",
+      noCoords: "Não foi possível encontrar coordenadas válidas na planilha. Verifique se as colunas Latitude e Longitude estão corretas.",
+      freeLimit: "Versão gratuita limitada a 10 paradas. Apenas as primeiras 10 foram carregadas."
+    },
+    en: {
+      appTitle: "RouteMaster",
+      upgrade: "Upgrade Now",
+      adText: "Remove ads and get unlimited routes with RouteMaster PRO!",
+      noRoute: "No active route",
+      importPlanilha: "Import an Excel spreadsheet (.xlsx) to start optimizing your deliveries.",
+      importBtn: "📂 IMPORT SPREADSHEET",
+      totalStops: "Total Stops",
+      totalDeliveries: "Total Deliveries",
+      pending: "Pending",
+      recalculate: "Recalculate",
+      settings: "Settings",
+      subscription: "Subscription",
+      general: "General",
+      theme: "Theme",
+      dark: "Dark",
+      light: "Light",
+      language: "Language",
+      advanced: "Advanced Optimization",
+      orsKey: "OpenRouteService Key (Optional)",
+      orsPlaceholder: "Enter your API key",
+      orsNote: "Required for Map Matching and real Distance Matrix.",
+      fixPoints: "Fix Points (Map Matching)",
+      data: "Data",
+      clearRoute: "Clear Current Route",
+      endRoute: "End Route",
+      newRoute: "New Route",
+      navigate: "Navigate to",
+      editAddress: "Edit Address",
+      nameLocal: "Name / Location",
+      fullAddress: "Full Address",
+      alignRoad: "Align to Road",
+      neighborhood: "Neighborhood",
+      packages: "Packages Qty",
+      save: "Save Changes",
+      startFromLastDone: "Start from last done delivery",
+      refinedSearch: "Refined Search (ORS)",
+      searching: "Searching...",
+      found: "Location updated!",
+      notFound: "Address not found in ORS.",
+      groupHere: "GROUP HERE",
+      inAppNav: "In-App Navigation",
+      exitNav: "Exit Navigation",
+      nextStop: "Next Stop",
+      distance: "Distance",
+      arrived: "Arrived!",
+      walking: "Walking",
+      driving: "Driving",
+      suggestWalking: "Close! We suggest going on foot.",
+      routeNameLabel: "Route Name",
+      routeNamePlaceholder: "Ex: Route Day 09 - Downtown",
+      confirmMove: "Do you want to change this pin's position?",
+      moveInstructions: "The pin is now unlocked. You can drag it to the new position.",
+      unlockMove: "Yes, Change Position",
+      perfectAddr: "Perfect Address",
+      incompleteAddr: "Incomplete Address",
+      verifyAddr: "Verify Address",
+      adLabel: "Ad",
+      proUser: "You are PRO",
+      changePro: "Switch to PRO",
+      observations: "Observations",
+      obsPlaceholder: "Ex: Leave at front desk, broken doorbell...",
+      successPoints: "Success! {count} points fixed.\nAverage correction distance: {dist}m",
+      errorMapMatching: "Error processing Map Matching. Check your API key.",
+      enterOrsKey: "Please enter an OpenRouteService API key first.",
+      confirmClear: "Are you sure you want to clear all route data?",
+      emptySheet: "The spreadsheet seems to be empty.",
+      noCoords: "Could not find valid coordinates in the spreadsheet. Check if Latitude and Longitude columns are correct.",
+      freeLimit: "Free version limited to 10 stops. Only the first 10 were loaded."
+    }
+  };
+
+  const t = (key: keyof typeof translations['pt']) => translations[language][key] || key;
 
   // Kalman Filters for GPS Smoothing
   const kalmanLat = useRef<KalmanFilter | null>(null);
@@ -173,6 +334,36 @@ export default function App() {
     return undefined;
   };
 
+  const cleanAddressAndExtractNotes = (addr: string): { cleanAddr: string, extractedNotes: string | null } => {
+    const keywords = [
+      "EM FRENTE A", "EM FRENTE AO", "FRENTE A", "FRENTE AO",
+      "AO LADO DE", "AO LADO DO", "LADO DE", "LADO DO",
+      "PROXIMO A", "PROXIMO AO", "PRÓXIMO A", "PRÓXIMO AO",
+      "ESQUINA COM", "ESQUINA", "PERTO DE", "PERTO DO"
+    ];
+
+    let cleanAddr = addr;
+    let extractedNotes: string | null = null;
+
+    const addrUpper = addr.toUpperCase();
+    
+    for (const keyword of keywords) {
+      const index = addrUpper.indexOf(keyword);
+      if (index !== -1) {
+        // Extract the part from the keyword onwards
+        const reference = addr.substring(index).trim();
+        extractedNotes = reference;
+        // The part before the keyword is the clean address
+        cleanAddr = addr.substring(0, index).trim();
+        // Remove trailing commas or dashes from clean address
+        cleanAddr = cleanAddr.replace(/[,-\s]+$/, '');
+        break; // Only take the first reference point found
+      }
+    }
+
+    return { cleanAddr, extractedNotes };
+  };
+
   const normalizeAddress = (addr: string): string => {
     return addr
       .toUpperCase()
@@ -185,6 +376,61 @@ export default function App() {
       .replace(/RESIDENCIAL/g, 'RES')
       .replace(/EDIFICIO/g, 'ED')
       .trim();
+  };
+
+  const verifyAddress = (addr: string, bairro: string): { quality: 'perfect' | 'incomplete' | 'warning', notes: string[] } => {
+    const notes: string[] = [];
+    let quality: 'perfect' | 'incomplete' | 'warning' = 'perfect';
+
+    const addrUpper = addr.toUpperCase();
+    
+    // Check for house number - usually at the end or after a comma
+    // Matches: ", 123", " 123", " N123", " NUMERO 123"
+    // Avoids matching street names like "RUA 10" if it's the only number
+    const numberMatch = addrUpper.match(/(?:^|[\s,])(?:Nº?|NUMERO|N)?\s?(\d+)(?:\s|$)/i);
+    const hasNumber = numberMatch !== null;
+    
+    // Check for "Sem Número"
+    const isSN = addrUpper.includes('S/N') || addrUpper.includes('SEM NUMERO') || addrUpper.includes('S.N');
+
+    const hasStreetPrefix = /(RUA|AV|AVENIDA|TRAVESSA|ALAMEDA|RODOVIA|ESTRADA|PRAÇA|PÇA|TV|AL|ROD|EST|LOTE|QUADRA|QD|LT)/i.test(addrUpper);
+    
+    // Minimum length for a "perfect" address is usually higher than 10
+    const isTooShort = addr.length < 12;
+    
+    const missingBairro = !bairro || bairro === 'Destino' || bairro === 'Bairro não informado' || bairro.length < 3;
+
+    // Logic for "Incomplete" or "Warning"
+    if (!hasNumber && !isSN) {
+      notes.push("Número da residência não identificado");
+      quality = 'incomplete';
+    } else if (isSN) {
+      notes.push("Endereço sem número (S/N)");
+      quality = 'warning';
+    }
+
+    if (!hasStreetPrefix) {
+      notes.push("Tipo de logradouro ausente (Rua, Av, etc)");
+      if (quality === 'perfect') quality = 'incomplete';
+    }
+
+    if (isTooShort && quality === 'perfect') {
+      notes.push("Endereço muito genérico");
+      quality = 'warning';
+    }
+
+    if (missingBairro) {
+      notes.push("Bairro não informado ou inválido");
+      if (quality === 'perfect') quality = 'incomplete';
+    }
+
+    // Check for "Esquina" or "Próximo" - often indicates a non-specific point
+    if (addrUpper.includes('ESQUINA') || addrUpper.includes('PROXIMO') || addrUpper.includes('AO LADO')) {
+      notes.push("Ponto de referência detectado (pode ser impreciso)");
+      if (quality === 'perfect') quality = 'warning';
+    }
+
+    return { quality, notes };
   };
 
   const handleExternalNav = (app: 'google' | 'waze' | 'apple') => {
@@ -201,6 +447,67 @@ export default function App() {
     window.open(url);
     setNavTarget(null);
   };
+
+  const startInternalNav = async () => {
+    if (!myLocation || !navTarget) {
+      alert(language === 'pt' ? "Localização GPS necessária para navegar no app." : "GPS location required for in-app navigation.");
+      return;
+    }
+    
+    const dist = routingService.getDistance(myLocation, { lat: navTarget.lat, lon: navTarget.lon });
+    const profile = dist < 300 ? 'foot-walking' : 'driving-car';
+    
+    setIsInternalNavigating(true);
+    setNavProfile(profile);
+    setNavTarget(null); // Close modal
+    
+    // Initial route
+    const directions = await routingService.getDirections(myLocation, { lat: navTarget.lat, lon: navTarget.lon }, profile);
+    if (directions) {
+      setNavRouteGeometry(directions);
+    }
+  };
+
+  // Update navigation route when moving
+  useEffect(() => {
+    if (isInternalNavigating && myLocation && navTarget) {
+      const updateNavRoute = async () => {
+        const directions = await routingService.getDirections(myLocation, { lat: navTarget.lat, lon: navTarget.lon }, navProfile);
+        if (directions) {
+          setNavRouteGeometry(directions);
+        }
+      };
+      
+      // Throttle updates
+      const timer = setTimeout(updateNavRoute, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [myLocation, isInternalNavigating, navTarget, navProfile]);
+
+  // Render navigation route
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (isInternalNavigating && navRouteGeometry) {
+      // Clear existing route if any
+      if (routePolylineRef.current) {
+        routePolylineRef.current.remove();
+      }
+
+      const coords = navRouteGeometry.features[0].geometry.coordinates.map((c: any) => [c[1], c[0]]);
+      routePolylineRef.current = L.polyline(coords, {
+        color: navProfile === 'foot-walking' ? '#3b82f6' : '#00ff41',
+        weight: 8,
+        opacity: 0.8,
+        lineJoin: 'round'
+      }).addTo(mapRef.current);
+
+      // Auto-center map on user during navigation
+      if (myLocation) {
+        mapRef.current.setView([myLocation.lat, myLocation.lon], 18, { animate: true });
+      }
+    }
+  }, [navRouteGeometry, isInternalNavigating, myLocation]);
 
   useEffect(() => {
     routingService.setApiKey(orsKey);
@@ -280,8 +587,9 @@ export default function App() {
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json<any>(ws);
@@ -313,8 +621,22 @@ export default function App() {
         
         const rawAddr = getVal(addrFields) || getVal(nameFields) || r.Endereco || r.address || r.ENDERECO || "Endereço não informado";
         const rawName = getVal(nameFields) || r.Nome || r.Cliente || r.CLIENTE;
-        const addr = normalizeAddress(String(rawAddr));
+        
+        const { cleanAddr, extractedNotes } = cleanAddressAndExtractNotes(String(rawAddr));
+        const addr = normalizeAddress(cleanAddr);
         const bairro = getVal(['bairro', 'neighborhood', 'regiao', 'região', 'setor', 'distrito', 'zona']) || r.Bairro || r.BAIRRO || "Destino";
+
+        // Geocoding fallback/refinement
+        let finalLat = lat;
+        let finalLon = lon;
+
+        if (orsKey && (isNaN(lat) || isNaN(lon) || extractedNotes)) {
+          const geocoded = await routingService.geocode(`${addr}, ${bairro}`);
+          if (geocoded) {
+            finalLat = geocoded.lat;
+            finalLon = geocoded.lon;
+          }
+        }
 
         const type = await classifyAddress(String(addr));
         const condoName = type === 'condominio' ? extractCondoName(String(addr)) : undefined;
@@ -322,8 +644,8 @@ export default function App() {
 
         return {
           id: i,
-          lat,
-          lon,
+          lat: finalLat,
+          lon: finalLon,
           addr: String(addr),
           name: rawName ? String(rawName) : undefined,
           bairro: String(bairro),
@@ -331,7 +653,8 @@ export default function App() {
           type,
           condoName,
           quality: verification.quality,
-          verificationNotes: verification.notes
+          verificationNotes: verification.notes,
+          notes: extractedNotes || undefined
         };
       }));
       
@@ -357,7 +680,11 @@ export default function App() {
 
       setDeliveries(parsed);
       reoptimizeRoute(parsed, true);
-    };
+    } catch (error) {
+      console.error("Erro ao processar planilha:", error);
+      alert("Erro ao processar a planilha. Verifique o formato do arquivo.");
+    }
+  };
     reader.readAsBinaryString(file);
   };
 
@@ -371,9 +698,17 @@ export default function App() {
       return;
     }
 
-    let startPos: Location = (useGps && myLocation) 
-      ? myLocation 
-      : { lat: pends[0].lat, lon: pends[0].lon };
+    let startPos: Location;
+    
+    if (startFromLastDone && dones.length > 0) {
+      // Find the last done delivery (highest order)
+      const lastDone = [...dones].sort((a, b) => (b.order || 0) - (a.order || 0))[0];
+      startPos = { lat: lastDone.lat, lon: lastDone.lon };
+    } else if (useGps && myLocation) {
+      startPos = myLocation;
+    } else {
+      startPos = { lat: pends[0].lat, lon: pends[0].lon };
+    }
 
     // 1. Cluster nearby points (e.g. same building or very close)
     const clusterIndices = routingService.clusterPoints(pends.map(d => ({ lat: d.lat, lon: d.lon })), 30);
@@ -441,18 +776,33 @@ export default function App() {
 
       const marker = L.marker([p.lat, p.lon], { 
         icon,
-        draggable: true 
+        draggable: false 
       }).addTo(markersLayerRef.current!);
       
       markerMapRef.current[p.id] = marker;
 
+      // Long press detection
+      let pressTimer: any;
+      const startPress = () => {
+        pressTimer = setTimeout(() => {
+          setMovingMarkerId(p.id);
+        }, 700);
+      };
+      const endPress = () => {
+        clearTimeout(pressTimer);
+      };
+
+      marker.on('mousedown touchstart', startPress);
+      marker.on('mouseup touchend mousemove touchmove popupopen', endPress);
+
       marker.on('dragend', (e) => {
         const newPos = e.target.getLatLng();
         handleUpdateDelivery(p.id, { lat: newPos.lat, lon: newPos.lng });
+        e.target.dragging.disable();
       });
       
       const popupContent = `
-        <div class="p-1 min-w-[140px]">
+        <div class="p-1 min-w-[160px]">
           <div class="flex items-center justify-between mb-1">
             <div class="text-orange-500 font-black text-[10px] uppercase">${p.bairro}</div>
             <div class="text-[9px] font-bold text-slate-400 uppercase">${p.type || 'casa'}</div>
@@ -460,12 +810,35 @@ export default function App() {
           ${p.condoName ? `<div class="text-[10px] font-black text-emerald-600 uppercase mb-1">🏢 ${p.condoName}</div>` : ''}
           ${p.name ? `<div class="text-[10px] font-black text-slate-500 uppercase mb-1">👤 ${p.name}</div>` : ''}
           <div class="text-slate-900 font-bold text-sm leading-tight mb-2">${p.addr}</div>
-          ${p.count && p.count > 1 ? `<div class="mb-2 flex items-center gap-1 text-[10px] font-black text-orange-500 bg-orange-500/10 px-1.5 py-0.5 rounded w-fit uppercase">📦 ${p.count} Pacotes</div>` : ''}
+          ${p.notes ? `<div class="text-[10px] text-slate-500 italic mb-2 bg-slate-50 p-1.5 rounded border border-slate-100">📝 ${p.notes}</div>` : ''}
+          ${p.quality ? `
+            <div class="flex items-center gap-1 text-[8px] font-black uppercase mb-2 ${
+              p.quality === 'perfect' ? 'text-emerald-500' : 
+              p.quality === 'incomplete' ? 'text-orange-500' : 'text-red-500'
+            }">
+              ● ${p.quality === 'perfect' ? 'Completo' : p.quality === 'incomplete' ? 'Incompleto' : 'Verificar'}
+            </div>
+            ${p.quality !== 'perfect' && p.verificationNotes ? `
+              <div class="flex flex-wrap gap-0.5 mb-2">
+                ${p.verificationNotes.map(n => `<span class="text-[7px] bg-slate-100 text-slate-500 px-1 rounded uppercase font-bold">${n}</span>`).join('')}
+              </div>
+            ` : ''}
+          ` : ''}
+          <div class="flex items-center gap-1 mb-2">
+            ${p.count && p.count > 1 ? `<div class="flex items-center gap-1 text-[10px] font-black text-orange-500 bg-orange-500/10 px-1.5 py-0.5 rounded uppercase">📦 ${p.count}</div>` : ''}
+            <div class="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded uppercase">#${p.order}</div>
+          </div>
           
-          <button class="edit-popup-btn w-full py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-            EDITAR ENTREGA
-          </button>
+          <div class="grid grid-cols-1 gap-1.5">
+            <button class="done-popup-btn w-full py-2 ${isDone ? 'bg-slate-500' : 'bg-[#00ff41]'} text-[#0a192f] rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              ${isDone ? (language === 'pt' ? 'CONCLUÍDO' : 'DONE') : (language === 'pt' ? 'CONCLUIR' : 'DONE')}
+            </button>
+            <button class="edit-popup-btn w-full py-2 border border-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-slate-50 transition-all flex items-center justify-center gap-2 active:scale-95">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+              ${t('editAddress').toUpperCase()}
+            </button>
+          </div>
         </div>
       `;
 
@@ -474,10 +847,19 @@ export default function App() {
       marker.on('popupopen', (e) => {
         const container = e.popup.getElement();
         const editBtn = container?.querySelector('.edit-popup-btn');
+        const doneBtn = container?.querySelector('.done-popup-btn');
+
         if (editBtn) {
           L.DomEvent.on(editBtn as HTMLElement, 'click', (ev) => {
             L.DomEvent.stopPropagation(ev);
             setEditingDelivery(p);
+          });
+        }
+
+        if (doneBtn) {
+          L.DomEvent.on(doneBtn as HTMLElement, 'click', (ev) => {
+            L.DomEvent.stopPropagation(ev);
+            toggleStatus(p.id);
           });
         }
       });
@@ -530,10 +912,31 @@ export default function App() {
   };
 
   const toggleStatus = (id: number) => {
-    const updated = deliveries.map(d => 
-      d.id === id ? { ...d, done: !d.done } : d
-    );
+    let nextToFocus: number | null = null;
+    
+    const updated = deliveries.map(d => {
+      if (d.id === id) {
+        const isNowDone = !d.done;
+        if (isNowDone) {
+          // Find the next pending delivery in the ordered list
+          const pending = deliveries.filter(x => !x.done && x.id !== id);
+          if (pending.length > 0) {
+            // Sort by order if available, otherwise just take the next one
+            const sorted = [...pending].sort((a, b) => (a.order || 0) - (b.order || 0));
+            nextToFocus = sorted[0].id;
+          }
+        }
+        return { ...d, done: isNowDone };
+      }
+      return d;
+    });
+
     setDeliveries(updated);
+    
+    if (nextToFocus !== null) {
+      // Small delay to allow state update and marker refresh
+      setTimeout(() => focusDelivery(nextToFocus!), 100);
+    }
   };
 
   const toggleType = (id: number) => {
@@ -568,13 +971,17 @@ export default function App() {
   };
 
   const clearRoute = () => {
-    if (window.confirm('Tem certeza que deseja limpar todos os dados da rota?')) {
+    if (window.confirm(t('confirmClear'))) {
       setDeliveries([]);
       setActiveId(null);
       setMergingId(null);
       setNavTarget(null);
       setEditingDelivery(null);
       setIsSettingsOpen(false);
+      
+      const d = new Date();
+      const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+      setRouteName(`Rota dia ${d.getDate().toString().padStart(2, '0')} de ${months[d.getMonth()]}`);
       
       // Force clear map layers
       if (markersLayerRef.current) markersLayerRef.current.clearLayers();
@@ -588,6 +995,17 @@ export default function App() {
         mapRef.current.setView([-16.68, -49.25], 13);
       }
     }
+  };
+
+  const endRoute = () => {
+    if (window.confirm(language === 'pt' ? 'Deseja encerrar esta rota e marcar todas como concluídas?' : 'Do you want to end this route and mark all as completed?')) {
+      setDeliveries(prev => prev.map(d => ({ ...d, done: true })));
+      setIsSettingsOpen(false);
+    }
+  };
+
+  const newRoute = () => {
+    clearRoute();
   };
 
   const handleMerge = (sourceId: number, targetId: number) => {
@@ -619,20 +1037,25 @@ export default function App() {
   return (
     <div className={cn(
       "h-screen w-screen overflow-hidden flex flex-col",
-      theme === 'dark' ? "bg-slate-900 text-slate-100" : "bg-slate-50 text-slate-900"
+      theme === 'dark' ? "bg-[#0a192f] text-slate-100" : "bg-slate-50 text-slate-900"
     )}>
       {/* Top Bar */}
       <header className={cn(
-        "h-16 px-4 flex items-center justify-between z-[2000] border-b",
-        theme === 'dark' ? "bg-slate-800/80 border-slate-700 backdrop-blur-md" : "bg-white/80 border-slate-200 backdrop-blur-md"
+        "h-20 px-4 flex items-center justify-between z-[2000] border-b",
+        theme === 'dark' ? "bg-[#112240]/80 border-slate-700 backdrop-blur-md" : "bg-white/80 border-slate-200 backdrop-blur-md"
       )}>
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-500/10 rounded-lg">
-            <Compass className="w-6 h-6 text-emerald-400" />
+          <div className="p-2 bg-[#00ff41]/10 rounded-lg">
+            <Compass className="w-6 h-6 text-[#00ff41]" />
           </div>
-          <h1 className="text-lg font-bold tracking-tight">
-            PoupeRota <span className={isPro ? "text-orange-500" : "text-slate-400"}>{isPro ? "PRO" : "FREE"}</span>
-          </h1>
+          <div className="flex flex-col">
+            <h1 className="text-lg font-bold tracking-tight leading-none">
+              {t('appTitle')} <span className={isPro ? "text-orange-500" : "text-slate-400"}>{isPro ? "PRO" : "FREE"}</span>
+            </h1>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-widest mt-1">
+              Deliver More, Drive Less
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <button 
@@ -696,44 +1119,63 @@ export default function App() {
             <div className="flex-1 overflow-y-auto min-h-0 px-4 py-2">
               {!isPro && deliveries.length > 0 && (
                 <div className="mb-4 p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl text-center">
-                  <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest mb-1">Anúncio</p>
-                  <p className="text-xs text-slate-400">Remova anúncios e tenha rotas ilimitadas com o PoupeRota PRO!</p>
+                  <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest mb-1">{t('adLabel')}</p>
+                  <p className="text-xs text-slate-400">{t('adText')}</p>
                   <button 
                     onClick={() => setIsSettingsOpen(true)}
                     className="mt-2 text-[10px] font-black text-orange-500 underline uppercase"
                   >
-                    Upgrade Agora
+                    {t('upgrade')}
                   </button>
                 </div>
               )}
               {deliveries.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                  <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-4">
-                    <Upload className="w-8 h-8 text-emerald-400" />
+                  <div className="w-16 h-16 bg-[#00ff41]/10 rounded-2xl flex items-center justify-center mb-4">
+                    <Upload className="w-8 h-8 text-[#00ff41]" />
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">Nenhuma rota ativa</h3>
-                  <p className="text-sm text-slate-400 mb-6">Importe uma planilha Excel (.xlsx) para começar a otimizar suas entregas.</p>
-                  <label className="w-full py-4 px-6 border-2 border-dashed border-emerald-500/50 rounded-2xl text-emerald-400 font-bold cursor-pointer hover:bg-emerald-500/5 transition-colors text-center">
-                    📂 IMPORTAR PLANILHA
+                  <h3 className="text-lg font-semibold mb-2">{t('noRoute')}</h3>
+                  <p className="text-sm text-slate-400 mb-6">{t('importPlanilha')}</p>
+                  <label className="w-full py-4 px-6 border-2 border-dashed border-[#00ff41]/50 rounded-2xl text-[#00ff41] font-bold cursor-pointer hover:bg-[#00ff41]/5 transition-colors text-center">
+                    {t('importBtn')}
                     <input type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
                   </label>
                 </div>
               ) : (
                 <div className="space-y-6 pb-24">
+                  {/* Route Name Section */}
+                  <div className="mb-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Edit className="w-3 h-3 text-slate-500" />
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t('routeNameLabel')}</span>
+                    </div>
+                    <input 
+                      type="text"
+                      value={routeName}
+                      onChange={(e) => setRouteName(e.target.value)}
+                      className={cn(
+                        "w-full bg-transparent border-none focus:ring-0 text-lg font-black tracking-tight p-0",
+                        theme === 'dark' ? "text-white" : "text-slate-900"
+                      )}
+                      placeholder={t('routeNamePlaceholder')}
+                    />
+                    <div className="h-0.5 w-8 bg-[#00ff41] mt-1" />
+                  </div>
+
                   {/* Summary Section */}
                   <div className="grid grid-cols-2 gap-3 mb-2">
                     <div className={cn(
                       "p-3 rounded-2xl border flex flex-col",
-                      theme === 'dark' ? "bg-slate-900/50 border-slate-700" : "bg-slate-50 border-slate-100"
+                      theme === 'dark' ? "bg-[#112240]/50 border-slate-700" : "bg-slate-50 border-slate-100"
                     )}>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total de Paradas</span>
-                      <span className="text-xl font-black text-emerald-500">{deliveries.length}</span>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t('totalStops')}</span>
+                      <span className="text-xl font-black text-[#00ff41]">{deliveries.length}</span>
                     </div>
                     <div className={cn(
                       "p-3 rounded-2xl border flex flex-col",
                       theme === 'dark' ? "bg-slate-900/50 border-slate-700" : "bg-slate-50 border-slate-100"
                     )}>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total de Entregas</span>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t('totalDeliveries')}</span>
                       <span className="text-xl font-black text-orange-500">
                         {deliveries.reduce((acc, d) => acc + (d.count || 1), 0)}
                       </span>
@@ -744,14 +1186,36 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between mb-4 px-1">
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                        Pendentes ({deliveries.filter(d => !d.done).length})
+                        {t('pending')} ({deliveries.filter(d => !d.done).length})
                       </span>
-                      <button 
-                        onClick={() => reoptimizeRoute(deliveries, true)}
-                        className="text-xs font-bold text-emerald-400 hover:underline flex items-center gap-1"
-                      >
-                        <RotateCcw className="w-3 h-3" /> Recalcular
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <input 
+                            type="checkbox" 
+                            className="hidden" 
+                            checked={startFromLastDone}
+                            onChange={(e) => setStartFromLastDone(e.target.checked)}
+                          />
+                          <div className={cn(
+                            "w-8 h-4 rounded-full relative transition-colors",
+                            startFromLastDone ? "bg-[#00ff41]" : "bg-slate-700"
+                          )}>
+                            <div className={cn(
+                              "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all",
+                              startFromLastDone ? "left-4.5" : "left-0.5"
+                            )} />
+                          </div>
+                          <span className="text-[9px] font-bold text-slate-500 uppercase group-hover:text-slate-400 transition-colors">
+                            {t('startFromLastDone')}
+                          </span>
+                        </label>
+                        <button 
+                          onClick={() => reoptimizeRoute(deliveries, true)}
+                          className="text-xs font-bold text-[#00ff41] hover:underline flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3" /> {t('recalculate')}
+                        </button>
+                      </div>
                     </div>
                     
                     {deliveries.filter(d => !d.done).map((p, i) => (
@@ -836,7 +1300,39 @@ export default function App() {
                             👤 {p.name}
                           </div>
                         )}
-                        <h4 className="text-sm font-semibold leading-tight mb-3">{p.addr}</h4>
+                        <h4 className="text-sm font-semibold leading-tight mb-2">{p.addr}</h4>
+                        
+                        {p.notes && (
+                          <div className="text-xs text-slate-500 italic mb-3 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg border border-slate-100 dark:border-slate-800 flex items-start gap-2">
+                            <span className="mt-0.5">📝</span>
+                            <span>{p.notes}</span>
+                          </div>
+                        )}
+                        
+                        {p.quality && (
+                          <div className={cn(
+                            "flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest mb-3 px-2 py-1 rounded-lg w-fit",
+                            p.quality === 'perfect' ? "bg-emerald-500/10 text-emerald-500" :
+                            p.quality === 'incomplete' ? "bg-orange-500/10 text-orange-500" :
+                            "bg-red-500/10 text-red-500"
+                          )}>
+                            {p.quality === 'perfect' && <CheckCircle className="w-3 h-3" />}
+                            {p.quality === 'incomplete' && <Info className="w-3 h-3" />}
+                            {p.quality === 'warning' && <AlertTriangle className="w-3 h-3" />}
+                            {p.quality === 'perfect' ? t('perfectAddr') : 
+                             p.quality === 'incomplete' ? t('incompleteAddr') : t('verifyAddr')}
+                          </div>
+                        )}
+
+                        {p.quality !== 'perfect' && p.verificationNotes && p.verificationNotes.length > 0 && (
+                          <div className="mb-3 flex flex-wrap gap-1">
+                            {p.verificationNotes.map((note, idx) => (
+                              <span key={idx} className="text-[8px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded uppercase">
+                                {note}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         
                         <div className="flex gap-2">
                           {mergingId ? (
@@ -846,9 +1342,9 @@ export default function App() {
                                   e.stopPropagation();
                                   handleMerge(mergingId, p.id);
                                 }}
-                                className="w-full py-2.5 bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-lg"
+                                className="w-full py-2.5 bg-[#00ff41] text-[#0a192f] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-lg"
                               >
-                                <Layers className="w-3.5 h-3.5" /> AGRUPAR AQUI
+                                <Layers className="w-3.5 h-3.5" /> {t('groupHere')}
                               </button>
                             )
                           ) : (
@@ -858,9 +1354,9 @@ export default function App() {
                                   e.stopPropagation();
                                   setNavTarget(p);
                                 }}
-                                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-emerald-500/20"
+                                className="flex-1 py-2.5 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-[#00ff41]/20"
                               >
-                                <Navigation className="w-3.5 h-3.5" /> NAVEGAR
+                                <Navigation className="w-3.5 h-3.5" /> {t('navigate').toUpperCase()}
                               </button>
                               <button 
                                 onClick={(e) => {
@@ -877,9 +1373,9 @@ export default function App() {
                                   e.stopPropagation();
                                   toggleStatus(p.id);
                                 }}
-                                className="flex-1 py-2.5 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                                className="flex-1 py-2.5 border border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41]/10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
                               >
-                                <CheckCircle2 className="w-3.5 h-3.5" /> CONCLUIR
+                                <CheckCircle2 className="w-3.5 h-3.5" /> {language === 'pt' ? 'CONCLUIR' : 'DONE'}
                               </button>
                             </>
                           )}
@@ -893,7 +1389,7 @@ export default function App() {
                     <div className="space-y-3 pt-4 border-t border-slate-700/50">
                       <div className="px-1">
                         <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                          Concluídos ({deliveries.filter(d => d.done).length})
+                          {language === 'pt' ? 'Concluídos' : 'Completed'} ({deliveries.filter(d => d.done).length})
                         </span>
                       </div>
                       
@@ -939,7 +1435,7 @@ export default function App() {
                             </div>
                             <div className="flex flex-col items-end">
                               <span className="text-xs font-black text-emerald-500">
-                                #{p.order} - CONCLUÍDO
+                                #{p.order} - {language === 'pt' ? 'CONCLUÍDO' : 'COMPLETED'}
                               </span>
                               {p.count && p.count > 1 && (
                                 <div className="flex items-center gap-1 text-[10px] font-black text-slate-500 bg-slate-500/10 px-1.5 py-0.5 rounded mt-1">
@@ -962,15 +1458,15 @@ export default function App() {
                           <h4 className="text-sm font-semibold leading-tight mb-1 line-through text-slate-500">{p.addr}</h4>
                           
                           <div className="flex gap-2">
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleStatus(p.id);
-                              }}
-                              className="w-full py-2.5 border border-slate-600 text-slate-400 hover:bg-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" /> REABRIR
-                            </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleStatus(p.id);
+                                }}
+                                className="w-full py-2.5 border border-slate-600 text-slate-400 hover:bg-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" /> {language === 'pt' ? 'REABRIR' : 'REOPEN'}
+                              </button>
                           </div>
                         </motion.div>
                       ))}
@@ -984,13 +1480,13 @@ export default function App() {
             {deliveries.length > 0 && (
               <div className={cn(
                 "p-4 border-t",
-                theme === 'dark' ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
+                theme === 'dark' ? "bg-[#112240] border-slate-700" : "bg-white border-slate-200"
               )}>
                 <button 
                   onClick={() => reoptimizeRoute(deliveries, true)}
-                  className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black text-sm tracking-tight transition-all shadow-xl shadow-emerald-500/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                  className="w-full py-4 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-2xl font-black text-sm tracking-tight transition-all shadow-xl shadow-[#00ff41]/20 active:scale-[0.98] flex items-center justify-center gap-2"
                 >
-                  <RotateCcw className="w-4 h-4" /> RECALCULAR PELA MINHA POSIÇÃO
+                  <RotateCcw className="w-4 h-4" /> {language === 'pt' ? 'RECALCULAR PELA MINHA POSIÇÃO' : 'RECALCULATE FROM MY POSITION'}
                 </button>
               </div>
             )}
@@ -1019,7 +1515,7 @@ export default function App() {
               )}
             >
               <div className="p-6 border-b border-slate-700/50 flex items-center justify-between">
-                <h2 className="text-xl font-bold">Configurações</h2>
+                <h2 className="text-xl font-bold">{t('settings')}</h2>
                 <button 
                   onClick={() => setIsSettingsOpen(false)}
                   className="p-2 hover:bg-slate-700/50 rounded-full"
@@ -1030,7 +1526,7 @@ export default function App() {
               
               <div className="p-6 space-y-6">
                 <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Assinatura</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('subscription')}</h3>
                   
                   <button 
                     onClick={() => {
@@ -1046,14 +1542,14 @@ export default function App() {
                   >
                     <div className="flex items-center gap-3">
                       <Compass className={cn("w-5 h-5", isPro ? "text-orange-500" : "text-slate-400")} />
-                      <span className="font-semibold">{isPro ? "Você é PRO" : "Mudar para PRO"}</span>
+                      <span className="font-semibold">{isPro ? t('proUser') : t('changePro')}</span>
                     </div>
                     {!isPro && <span className="text-[10px] font-black bg-orange-500 text-white px-2 py-1 rounded">UPGRADE</span>}
                   </button>
                 </div>
 
                 <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Geral</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('general')}</h3>
                   
                   <button 
                     onClick={() => {
@@ -1063,11 +1559,11 @@ export default function App() {
                   >
                     <div className="flex items-center gap-3">
                       {theme === 'dark' ? <Moon className="w-5 h-5 text-indigo-400" /> : <Sun className="w-5 h-5 text-orange-400" />}
-                      <span className="font-semibold">Tema {theme === 'dark' ? 'Escuro' : 'Claro'}</span>
+                      <span className="font-semibold">{t('theme')} {theme === 'dark' ? t('dark') : t('light')}</span>
                     </div>
                     <div className={cn(
                       "w-12 h-6 rounded-full relative transition-colors",
-                      theme === 'dark' ? "bg-emerald-500" : "bg-slate-600"
+                      theme === 'dark' ? "bg-[#00ff41]" : "bg-slate-600"
                     )}>
                       <div className={cn(
                         "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
@@ -1075,30 +1571,52 @@ export default function App() {
                       )} />
                     </div>
                   </button>
+
+                  <button 
+                    onClick={() => {
+                      setLanguage(l => l === 'pt' ? 'en' : 'pt');
+                    }}
+                    className="w-full flex items-center justify-between p-4 rounded-2xl bg-slate-900/30 hover:bg-slate-900/50 transition-colors border border-slate-700/30"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Languages className="w-5 h-5 text-[#00ff41]" />
+                      <span className="font-semibold">{t('language')}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-xs font-bold", language === 'pt' ? "text-[#00ff41]" : "text-slate-500")}>PT</span>
+                      <div className="w-8 h-4 bg-slate-700 rounded-full relative">
+                        <div className={cn(
+                          "absolute top-1 w-2 h-2 bg-white rounded-full transition-all",
+                          language === 'en' ? "left-5" : "left-1"
+                        )} />
+                      </div>
+                      <span className={cn("text-xs font-bold", language === 'en' ? "text-[#00ff41]" : "text-slate-500")}>EN</span>
+                    </div>
+                  </button>
                 </div>
 
                 <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Otimização Avançada</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('advanced')}</h3>
                   
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Chave OpenRouteService (Opcional)</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">{t('orsKey')}</label>
                     <input 
                       type="password"
-                      placeholder="Insira sua chave API"
+                      placeholder={t('orsPlaceholder')}
                       className={cn(
-                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-xs",
+                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all text-xs",
                         theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                       )}
                       value={orsKey}
                       onChange={(e) => setOrsKey(e.target.value)}
                     />
-                    <p className="text-[9px] text-slate-500">Necessário para Map Matching e Matriz de Distância real.</p>
+                    <p className="text-[9px] text-slate-500">{t('orsNote')}</p>
                   </div>
 
                   <button 
                     onClick={async () => {
                       if (!orsKey) {
-                        alert("Por favor, insira uma chave API do OpenRouteService primeiro.");
+                        alert(t('enterOrsKey'));
                         return;
                       }
                       
@@ -1121,38 +1639,166 @@ export default function App() {
                         });
                         
                         setDeliveries(updated);
-                        alert(`Sucesso! ${updated.length} pontos corrigidos.\nDistância média de correção: ${(totalCorrection / updated.length).toFixed(1)}m`);
+                        alert(t('successPoints').replace('{count}', updated.length.toString()).replace('{dist}', (totalCorrection / updated.length).toFixed(1)));
                       } catch (err) {
-                        alert("Erro ao processar Map Matching. Verifique sua chave API.");
+                        alert(t('errorMapMatching'));
                       }
                     }}
-                    className="w-full flex items-center gap-3 p-4 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors border border-emerald-500/20"
+                    className="w-full flex items-center gap-3 p-4 rounded-2xl bg-[#00ff41]/10 hover:bg-[#00ff41]/20 text-[#00ff41] transition-colors border border-[#00ff41]/20"
                   >
                     <Target className="w-5 h-5" />
-                    <span className="font-semibold">Corrigir Pontos (Map Matching)</span>
+                    <span className="font-semibold">{t('fixPoints')}</span>
                   </button>
                 </div>
 
                 <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Dados</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('data')}</h3>
                   
                   <button 
                     onClick={clearRoute}
                     className="w-full flex items-center gap-3 p-4 rounded-2xl bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors border border-red-500/20"
                   >
                     <RotateCcw className="w-5 h-5" />
-                    <span className="font-semibold">Limpar Rota Atual</span>
+                    <span className="font-semibold">{t('clearRoute')}</span>
                   </button>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={endRoute}
+                      className="flex items-center justify-center gap-2 p-4 rounded-2xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 transition-colors border border-orange-500/20"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase">{t('endRoute')}</span>
+                    </button>
+                    <button 
+                      onClick={newRoute}
+                      className="flex items-center justify-center gap-2 p-4 rounded-2xl bg-[#00ff41]/10 hover:bg-[#00ff41]/20 text-[#00ff41] transition-colors border border-[#00ff41]/20"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase">{t('newRoute')}</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="pt-4 text-center">
                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">
-                    PoupeRota Pro v1.2.0
+                    RouteMaster Pro v1.2.0
                   </p>
                 </div>
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Navigation HUD */}
+      <AnimatePresence>
+        {isInternalNavigating && navTarget && (
+          <motion.div
+            initial={{ y: -100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -100, opacity: 0 }}
+            className="fixed top-4 left-4 right-4 z-[4000] md:left-auto md:right-4 md:w-80"
+          >
+            <div className={cn(
+              "p-4 rounded-3xl shadow-2xl border flex flex-col gap-3",
+              theme === 'dark' ? "bg-slate-900/90 border-slate-700 backdrop-blur-md" : "bg-white/90 border-slate-200 backdrop-blur-md"
+            )}>
+              {/* Walking Suggestion Alert */}
+              {navProfile === 'driving-car' && myLocation && routingService.getDistance(myLocation, { lat: navTarget.lat, lon: navTarget.lon }) < 300 && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  className="bg-blue-500/20 border border-blue-500/30 rounded-2xl p-3 flex items-center gap-3 overflow-hidden"
+                >
+                  <Footprints className="w-5 h-5 text-blue-400 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest leading-none mb-1">{t('suggestWalking')}</p>
+                    <button 
+                      onClick={() => setNavProfile('foot-walking')}
+                      className="text-[10px] font-black text-white bg-blue-500 px-2 py-1 rounded-lg uppercase"
+                    >
+                      {t('walking')}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "w-10 h-10 rounded-2xl flex items-center justify-center",
+                    navProfile === 'foot-walking' ? "bg-blue-500/20" : "bg-[#00ff41]/20"
+                  )}>
+                    {navProfile === 'foot-walking' ? (
+                      <Footprints className="w-6 h-6 text-blue-400" />
+                    ) : (
+                      <Navigation className="w-6 h-6 text-[#00ff41]" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t('nextStop')}</p>
+                    <p className="text-sm font-black truncate max-w-[150px]">{navTarget.name || navTarget.addr}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setNavProfile(prev => prev === 'driving-car' ? 'foot-walking' : 'driving-car')}
+                    className={cn(
+                      "p-2 rounded-full transition-colors",
+                      theme === 'dark' ? "bg-slate-800 hover:bg-slate-700" : "bg-slate-100 hover:bg-slate-200"
+                    )}
+                  >
+                    {navProfile === 'foot-walking' ? <Car className="w-4 h-4" /> : <Footprints className="w-4 h-4" />}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsInternalNavigating(false);
+                      setNavRouteGeometry(null);
+                      if (routePolylineRef.current) {
+                        routePolylineRef.current.remove();
+                        routePolylineRef.current = null;
+                      }
+                    }}
+                    className="p-2 bg-red-500/10 text-red-500 rounded-full hover:bg-red-500/20 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="h-px bg-slate-700/30 w-full" />
+
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t('distance')}</p>
+                  <p className={cn(
+                    "text-xl font-black",
+                    navProfile === 'foot-walking' ? "text-blue-400" : "text-[#00ff41]"
+                  )}>
+                    {myLocation ? (routingService.getDistance(myLocation, { lat: navTarget.lat, lon: navTarget.lon }) / 1000).toFixed(2) : '--'} km
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    toggleStatus(navTarget.id);
+                    setIsInternalNavigating(false);
+                    setNavRouteGeometry(null);
+                    if (routePolylineRef.current) {
+                      routePolylineRef.current.remove();
+                      routePolylineRef.current = null;
+                    }
+                  }}
+                  className={cn(
+                    "px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95",
+                    navProfile === 'foot-walking' ? "bg-blue-500 text-white" : "bg-[#00ff41] text-[#0a192f]"
+                  )}
+                >
+                  {t('arrived')}
+                </button>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -1177,7 +1823,7 @@ export default function App() {
               )}
             >
               <div className="p-6 border-b border-slate-700/50 flex items-center justify-between">
-                <h2 className="text-xl font-bold">Navegar para</h2>
+                <h2 className="text-xl font-bold">{t('navigate')}</h2>
                 <button onClick={() => setNavTarget(null)} className="p-2 hover:bg-slate-700/50 rounded-full">
                   <X className="w-5 h-5" />
                 </button>
@@ -1211,6 +1857,23 @@ export default function App() {
                     <img src="https://upload.wikimedia.org/wikipedia/commons/1/17/Apple_Maps_logo.svg" className="w-6 h-6" alt="Apple Maps" />
                     Apple Maps
                   </button>
+
+                  <div className="relative py-4">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-700/30"></div>
+                    </div>
+                    <div className="relative flex justify-center text-[10px] uppercase tracking-widest font-bold text-slate-500">
+                      <span className={cn("px-2", theme === 'dark' ? "bg-slate-800" : "bg-white")}>ou</span>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={startInternalNav}
+                    className="w-full py-4 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-2xl font-black text-sm flex items-center justify-center gap-3 transition-all shadow-xl shadow-[#00ff41]/20"
+                  >
+                    <Compass className="w-6 h-6" />
+                    {t('inAppNav')}
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -1235,11 +1898,11 @@ export default function App() {
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
                 className={cn(
                   "relative w-full max-w-md rounded-3xl shadow-2xl overflow-hidden border",
-                  theme === 'dark' ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
+                  theme === 'dark' ? "bg-[#112240] border-slate-700" : "bg-white border-slate-200"
                 )}
               >
                 <div className="p-6 border-b border-slate-700/50 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">Editar Endereço</h2>
+                  <h2 className="text-xl font-bold">{t('editAddress')}</h2>
                   <button onClick={() => setEditingDelivery(null)} className="p-2 hover:bg-slate-700/50 rounded-full">
                     <X className="w-5 h-5" />
                   </button>
@@ -1247,34 +1910,62 @@ export default function App() {
 
                 <div className="p-6 space-y-4">
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Nome / Local</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">{t('nameLocal')}</label>
                     <input 
                       type="text"
                       className={cn(
-                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-emerald-500 outline-none transition-all mb-4",
+                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all mb-4",
                         theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                       )}
                       value={editingDelivery.name || ''}
                       onChange={(e) => setEditingDelivery({ ...editingDelivery, name: e.target.value })}
                     />
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Endereço Completo</label>
-                      {orsKey && (
-                        <button 
-                          onClick={async () => {
-                            const snapped = await routingService.snapPoint({ lat: editingDelivery.lat, lon: editingDelivery.lon });
-                            handleUpdateDelivery(editingDelivery.id, { lat: snapped.lat, lon: snapped.lon });
-                            alert("Ponto alinhado à via mais próxima!");
-                          }}
-                          className="text-[9px] font-black text-emerald-500 uppercase hover:underline"
-                        >
-                          Alinhar à Via
-                        </button>
-                      )}
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">{t('fullAddress')}</label>
+                      <div className="flex items-center gap-3">
+                        {orsKey && (
+                          <button 
+                            onClick={async (e) => {
+                              const btn = e.currentTarget;
+                              const originalText = btn.innerText;
+                              btn.innerText = t('searching');
+                              btn.disabled = true;
+                              
+                              try {
+                                const geocoded = await routingService.geocode(`${editingDelivery.addr}, ${editingDelivery.bairro}`);
+                                if (geocoded) {
+                                  setEditingDelivery({ ...editingDelivery, lat: geocoded.lat, lon: geocoded.lon });
+                                  alert(t('found'));
+                                } else {
+                                  alert(t('notFound'));
+                                }
+                              } finally {
+                                btn.innerText = originalText;
+                                btn.disabled = false;
+                              }
+                            }}
+                            className="text-[9px] font-black text-orange-500 uppercase hover:underline"
+                          >
+                            {t('refinedSearch')}
+                          </button>
+                        )}
+                        {orsKey && (
+                          <button 
+                            onClick={async () => {
+                              const snapped = await routingService.snapPoint({ lat: editingDelivery.lat, lon: editingDelivery.lon });
+                              setEditingDelivery({ ...editingDelivery, lat: snapped.lat, lon: snapped.lon });
+                              alert(language === 'pt' ? "Ponto alinhado à via mais próxima!" : "Point aligned to nearest road!");
+                            }}
+                            className="text-[9px] font-black text-[#00ff41] uppercase hover:underline"
+                          >
+                            {t('alignRoad')}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <textarea 
                       className={cn(
-                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-emerald-500 outline-none transition-all resize-none h-24",
+                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all resize-none h-24",
                         theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                       )}
                       value={editingDelivery.addr}
@@ -1283,11 +1974,11 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Bairro</label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">{t('neighborhood')}</label>
                       <input 
                         type="text"
                         className={cn(
-                          "w-full p-3 rounded-xl border focus:ring-2 focus:ring-emerald-500 outline-none transition-all",
+                          "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all",
                           theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                         )}
                         value={editingDelivery.bairro}
@@ -1295,11 +1986,11 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Qtd. Pacotes</label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">{t('packages')}</label>
                       <input 
                         type="number"
                         className={cn(
-                          "w-full p-3 rounded-xl border focus:ring-2 focus:ring-emerald-500 outline-none transition-all",
+                          "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all",
                           theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                         )}
                         value={editingDelivery.count || 1}
@@ -1307,31 +1998,99 @@ export default function App() {
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">{t('observations')}</label>
+                    <textarea 
+                      placeholder={t('obsPlaceholder')}
+                      className={cn(
+                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all resize-none h-20 text-xs",
+                        theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                      )}
+                      value={editingDelivery.notes || ''}
+                      onChange={(e) => setEditingDelivery({ ...editingDelivery, notes: e.target.value })}
+                    />
+                  </div>
                   <div className="space-y-3">
                     <button 
                       onClick={() => handleUpdateDelivery(editingDelivery.id, { 
                         addr: editingDelivery.addr, 
                         name: editingDelivery.name,
                         bairro: editingDelivery.bairro,
-                        count: editingDelivery.count
+                        count: editingDelivery.count,
+                        notes: editingDelivery.notes,
+                        lat: editingDelivery.lat,
+                        lon: editingDelivery.lon
                       })}
-                      className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black text-sm transition-all shadow-xl shadow-emerald-500/20 active:scale-[0.98]"
+                      className="w-full py-4 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-2xl font-black text-sm transition-all shadow-xl shadow-[#00ff41]/20 active:scale-[0.98]"
                     >
-                      SALVAR ALTERAÇÕES
+                      {t('save').toUpperCase()}
                     </button>
                     
                     <button 
                       onClick={() => {
-                        if (window.confirm('Excluir esta entrega da rota?')) {
+                        if (window.confirm(language === 'pt' ? 'Excluir esta entrega da rota?' : 'Delete this delivery from route?')) {
                           setDeliveries(deliveries.filter(d => d.id !== editingDelivery.id));
                           setEditingDelivery(null);
                         }
                       }}
                       className="w-full py-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-black text-sm transition-all border border-red-500/20 active:scale-[0.98]"
                     >
-                      EXCLUIR ENTREGA
+                      {language === 'pt' ? 'EXCLUIR ENTREGA' : 'DELETE DELIVERY'}
                     </button>
                   </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+        
+        {/* Confirm Move Modal */}
+        <AnimatePresence>
+          {movingMarkerId && (
+            <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setMovingMarkerId(null)}
+                className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className={cn(
+                  "relative w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden border p-6 text-center",
+                  theme === 'dark' ? "bg-[#112240] border-slate-700" : "bg-white border-slate-200"
+                )}
+              >
+                <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <MapPin className="w-8 h-8 text-orange-500" />
+                </div>
+                <h2 className="text-xl font-bold mb-2">{t('confirmMove')}</h2>
+                <p className="text-sm text-slate-400 mb-6">
+                  {t('moveInstructions')}
+                </p>
+                <div className="space-y-3">
+                  <button 
+                    onClick={() => {
+                      const marker = markerMapRef.current[movingMarkerId];
+                      if (marker) {
+                        marker.dragging.enable();
+                        marker.openPopup();
+                      }
+                      setMovingMarkerId(null);
+                    }}
+                    className="w-full py-4 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-2xl font-black text-sm transition-all shadow-xl shadow-[#00ff41]/20 active:scale-[0.98]"
+                  >
+                    {t('unlockMove').toUpperCase()}
+                  </button>
+                  <button 
+                    onClick={() => setMovingMarkerId(null)}
+                    className="w-full py-4 bg-slate-700/20 hover:bg-slate-700/30 text-slate-400 rounded-2xl font-black text-sm transition-all active:scale-[0.98]"
+                  >
+                    {language === 'pt' ? 'CANCELAR' : 'CANCEL'}
+                  </button>
                 </div>
               </motion.div>
             </div>

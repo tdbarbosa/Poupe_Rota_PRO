@@ -1,6 +1,6 @@
 
 /**
- * Routing Service for PoupeRota
+ * Routing Service for RouteMaster
  * Handles Map Matching, Matrix calculation and TSP Optimization
  */
 
@@ -219,6 +219,59 @@ class RoutingService {
   async snapPoint(point: LatLon): Promise<LatLon> {
     const snapped = await this.snapToRoads([point]);
     return snapped[0];
+  }
+
+  /**
+   * Geocoding using OpenRouteService
+   */
+  async geocode(text: string): Promise<LatLon | null> {
+    if (!this.orsApiKey) return null;
+
+    try {
+      const response = await fetch(`https://api.openrouteservice.org/geocode/search?api_key=${this.orsApiKey}&text=${encodeURIComponent(text)}&size=1`);
+      
+      if (!response.ok) throw new Error(`ORS Geocode Error: ${response.statusText}`);
+      
+      const data = await response.json();
+      
+      if (data.features && data.features.length > 0) {
+        const [lon, lat] = data.features[0].geometry.coordinates;
+        return { lat, lon };
+      }
+      
+      return null;
+    } catch (e) {
+      console.error("Geocode error", e);
+      return null;
+    }
+  }
+
+  /**
+   * Get directions between two points using OpenRouteService
+   */
+  async getDirections(start: LatLon, end: LatLon, profile: 'driving-car' | 'foot-walking' = 'driving-car'): Promise<any | null> {
+    if (!this.orsApiKey) return null;
+
+    try {
+      const response = await fetch(`https://api.openrouteservice.org/v2/directions/${profile}/geojson`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': this.orsApiKey
+        },
+        body: JSON.stringify({
+          coordinates: [[start.lon, start.lat], [end.lon, end.lat]]
+        })
+      });
+
+      if (!response.ok) throw new Error(`ORS Directions Error: ${response.statusText}`);
+      
+      const data = await response.json();
+      return data;
+    } catch (e) {
+      console.error("Directions error", e);
+      return null;
+    }
   }
 }
 
