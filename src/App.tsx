@@ -36,7 +36,9 @@ import {
   Search,
   Languages,
   Footprints,
-  Car
+  Car,
+  Mic,
+  ScanLine
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -60,6 +62,10 @@ interface Delivery {
   quality?: 'perfect' | 'incomplete' | 'warning';
   verificationNotes?: string[];
   notes?: string;
+  completedAt?: string;
+  arrivedAt?: string;
+  stopDuration?: number; // in seconds
+  packageId?: string;
 }
 
 interface Location {
@@ -74,8 +80,13 @@ export default function App() {
   const [myLocation, setMyLocation] = useState<Location | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [isDrawerExpanded, setIsDrawerExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [manualAddr, setManualAddr] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [mapStyle, setMapStyle] = useState<'dark' | 'light' | 'satellite'>('dark');
+  const [popupDelivery, setPopupDelivery] = useState<Delivery | null>(null);
   const [isPro, setIsPro] = useState(false);
   const [mergingId, setMergingId] = useState<number | null>(null);
   const [isClassifierReady, setIsClassifierReady] = useState(false);
@@ -145,6 +156,12 @@ export default function App() {
       driving: "Carro",
       suggestWalking: "Próximo! Sugerimos ir a pé.",
       routeNameLabel: "Nome da Rota",
+      packageNumber: "Ordem",
+      completedAt: "Finalizado em",
+      stopDuration: "Tempo de Parada",
+      estCompletion: "Estimativa de Término",
+      noPackageId: "Sem número",
+      exportCircuit: "Exportar para Circuit",
       routeNamePlaceholder: "Ex: Rota dia 09 - Senador Canedo",
       confirmMove: "Deseja alterar a posição deste pino?",
       moveInstructions: "O pino foi desbloqueado. Agora você pode arrastá-lo para a nova posição.",
@@ -163,7 +180,12 @@ export default function App() {
       confirmClear: "Tem certeza que deseja limpar todos os dados da rota?",
       emptySheet: "A planilha parece estar vazia.",
       noCoords: "Não foi possível encontrar coordenadas válidas na planilha. Verifique se as colunas Latitude e Longitude estão corretas.",
-      freeLimit: "Versão gratuita limitada a 10 paradas. Apenas as primeiras 10 foram carregadas."
+      freeLimit: "Versão gratuita limitada a 10 paradas. Apenas as primeiras 10 foram carregadas.",
+      copied: "Copiado!",
+      delivery: "Entrega",
+      address: "Endereço",
+      customer: "Cliente",
+      notes: "Observações"
     },
     en: {
       appTitle: "RouteMaster",
@@ -215,6 +237,12 @@ export default function App() {
       driving: "Driving",
       suggestWalking: "Close! We suggest going on foot.",
       routeNameLabel: "Route Name",
+      packageNumber: "Order",
+      completedAt: "Completed at",
+      stopDuration: "Stop Duration",
+      estCompletion: "Est. Completion",
+      noPackageId: "No number",
+      exportCircuit: "Export to Circuit",
       routeNamePlaceholder: "Ex: Route Day 09 - Downtown",
       confirmMove: "Do you want to change this pin's position?",
       moveInstructions: "The pin is now unlocked. You can drag it to the new position.",
@@ -233,7 +261,12 @@ export default function App() {
       confirmClear: "Are you sure you want to clear all route data?",
       emptySheet: "The spreadsheet seems to be empty.",
       noCoords: "Could not find valid coordinates in the spreadsheet. Check if Latitude and Longitude columns are correct.",
-      freeLimit: "Free version limited to 10 stops. Only the first 10 were loaded."
+      freeLimit: "Free version limited to 10 stops. Only the first 10 were loaded.",
+      copied: "Copied!",
+      delivery: "Delivery",
+      address: "Address",
+      customer: "Customer",
+      notes: "Notes"
     }
   };
 
@@ -580,10 +613,13 @@ export default function App() {
     updateMarkers(deliveries, activeId);
   }, [deliveries, activeId, myLocation]);
 
-  // File Import Logic
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Set route name from file name
+    const fileName = file.name.replace(/\.[^/.]+$/, "");
+    setRouteName(fileName);
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -618,9 +654,11 @@ export default function App() {
         // Prioritize actual address fields over "local" or "nome"
         const addrFields = ['endereco', 'endereço', 'address', 'destination address', 'logradouro', 'rua'];
         const nameFields = ['local', 'destino', 'ponto', 'nome', 'cliente', 'nome do cliente'];
+        const packageFields = ['sequencia', 'sequência', 'ordem', 'pacote', 'id pacote', 'package id', 'package'];
         
         const rawAddr = getVal(addrFields) || getVal(nameFields) || r.Endereco || r.address || r.ENDERECO || "Endereço não informado";
         const rawName = getVal(nameFields) || r.Nome || r.Cliente || r.CLIENTE;
+        const packageId = getVal(packageFields);
         
         const { cleanAddr, extractedNotes } = cleanAddressAndExtractNotes(String(rawAddr));
         const addr = normalizeAddress(cleanAddr);
@@ -654,7 +692,8 @@ export default function App() {
           condoName,
           quality: verification.quality,
           verificationNotes: verification.notes,
-          notes: extractedNotes || undefined
+          notes: extractedNotes || undefined,
+          packageId: packageId ? String(packageId) : undefined
         };
       }));
       
@@ -795,6 +834,10 @@ export default function App() {
       marker.on('mousedown touchstart', startPress);
       marker.on('mouseup touchend mousemove touchmove popupopen', endPress);
 
+      marker.on('click', () => {
+        setPopupDelivery(p);
+      });
+      
       marker.on('dragend', (e) => {
         const newPos = e.target.getLatLng();
         handleUpdateDelivery(p.id, { lat: newPos.lat, lon: newPos.lng });
@@ -913,20 +956,29 @@ export default function App() {
 
   const toggleStatus = (id: number) => {
     let nextToFocus: number | null = null;
+    const now = new Date();
     
     const updated = deliveries.map(d => {
       if (d.id === id) {
         const isNowDone = !d.done;
+        let completedAt = d.completedAt;
+        let stopDuration = d.stopDuration;
+
         if (isNowDone) {
+          completedAt = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          if (d.arrivedAt) {
+            const arrived = new Date(d.arrivedAt);
+            stopDuration = Math.floor((now.getTime() - arrived.getTime()) / 1000);
+          }
+          
           // Find the next pending delivery in the ordered list
           const pending = deliveries.filter(x => !x.done && x.id !== id);
           if (pending.length > 0) {
-            // Sort by order if available, otherwise just take the next one
             const sorted = [...pending].sort((a, b) => (a.order || 0) - (b.order || 0));
             nextToFocus = sorted[0].id;
           }
         }
-        return { ...d, done: isNowDone };
+        return { ...d, done: isNowDone, completedAt, stopDuration };
       }
       return d;
     });
@@ -934,9 +986,15 @@ export default function App() {
     setDeliveries(updated);
     
     if (nextToFocus !== null) {
-      // Small delay to allow state update and marker refresh
       setTimeout(() => focusDelivery(nextToFocus!), 100);
     }
+  };
+
+  const markArrived = (id: number) => {
+    const now = new Date();
+    setDeliveries(prev => prev.map(d => 
+      d.id === id ? { ...d, arrivedAt: now.toISOString() } : d
+    ));
   };
 
   const toggleType = (id: number) => {
@@ -1034,6 +1092,55 @@ export default function App() {
     }
   };
 
+  const addManualDelivery = async () => {
+    if (!manualAddr) return;
+    
+    let lat = -16.68;
+    let lon = -49.25;
+    let bairro = "Manual";
+    
+    if (orsKey) {
+      const geocoded = await routingService.geocode(manualAddr);
+      if (geocoded) {
+        lat = geocoded.lat;
+        lon = geocoded.lon;
+      }
+    }
+
+    const type = await classifyAddress(manualAddr);
+    const verification = verifyAddress(manualAddr, bairro);
+
+    const newDelivery: Delivery = {
+      id: Date.now(),
+      lat,
+      lon,
+      addr: manualAddr,
+      bairro,
+      done: false,
+      type,
+      quality: verification.quality,
+      verificationNotes: verification.notes
+    };
+
+    const updated = [...deliveries, newDelivery];
+    setDeliveries(updated);
+    reoptimizeRoute(updated, true);
+    setManualAddr("");
+    setIsManualEntryOpen(false);
+  };
+
+  const exportToCircuit = () => {
+    const pending = deliveries.filter(d => !d.done);
+    if (pending.length === 0) {
+      alert(language === 'pt' ? 'Nenhuma entrega pendente para exportar.' : 'No pending deliveries to export.');
+      return;
+    }
+    
+    const list = pending.map(d => d.addr).join('\n');
+    navigator.clipboard.writeText(list);
+    alert(t('exportCircuit') + ": " + t('copied'));
+  };
+
   return (
     <div className={cn(
       "h-screen w-screen overflow-hidden flex flex-col",
@@ -1041,34 +1148,55 @@ export default function App() {
     )}>
       {/* Top Bar */}
       <header className={cn(
-        "h-20 px-4 flex items-center justify-between z-[2000] border-b",
-        theme === 'dark' ? "bg-[#112240]/80 border-slate-700 backdrop-blur-md" : "bg-white/80 border-slate-200 backdrop-blur-md"
+        "h-16 px-4 flex items-center justify-between z-[2000] border-b shadow-sm",
+        theme === 'dark' ? "bg-[#0a192f]/90 border-slate-800 backdrop-blur-lg" : "bg-white/90 border-slate-200 backdrop-blur-lg"
       )}>
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-[#00ff41]/10 rounded-lg">
-            <Compass className="w-6 h-6 text-[#00ff41]" />
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-[#00ff41] rounded-lg flex items-center justify-center shadow-lg shadow-[#00ff41]/20">
+            <Compass className="w-5 h-5 text-[#0a192f]" />
           </div>
           <div className="flex flex-col">
-            <h1 className="text-lg font-bold tracking-tight leading-none">
-              {t('appTitle')} <span className={isPro ? "text-orange-500" : "text-slate-400"}>{isPro ? "PRO" : "FREE"}</span>
+            <h1 className="text-sm font-black tracking-tighter leading-none flex items-center gap-1">
+              {t('appTitle')} 
+              <span className={cn(
+                "text-[8px] px-1.5 py-0.5 rounded font-black",
+                isPro ? "bg-orange-500 text-white" : "bg-slate-700 text-slate-300"
+              )}>
+                {isPro ? "PRO" : "FREE"}
+              </span>
             </h1>
-            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-widest mt-1">
-              Deliver More, Drive Less
+            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
+              {routeName}
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setIsManualEntryOpen(true)}
+            className={cn(
+              "p-2 rounded-xl transition-all active:scale-90",
+              theme === 'dark' ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-900"
+            )}
+          >
+            <Plus className="w-4 h-4" />
+          </button>
           <button 
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            className="p-2 hover:bg-slate-700/50 rounded-full transition-colors"
+            className={cn(
+              "p-2 rounded-xl transition-all active:scale-90",
+              theme === 'dark' ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-900"
+            )}
           >
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <button 
             onClick={() => setIsSettingsOpen(true)}
-            className="p-2 hover:bg-slate-700/50 rounded-full transition-colors"
+            className={cn(
+              "p-2 rounded-xl transition-all active:scale-90",
+              theme === 'dark' ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-900"
+            )}
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </header>
@@ -1089,29 +1217,196 @@ export default function App() {
           >
             <Target className="w-6 h-6" />
           </button>
+          
+          <div className={cn(
+            "p-1 rounded-xl shadow-lg flex flex-col gap-1",
+            theme === 'dark' ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"
+          )}>
+            <button 
+              onClick={() => setMapStyle('dark')}
+              className={cn("w-10 h-10 rounded-lg flex items-center justify-center transition-all", mapStyle === 'dark' ? "bg-[#00ff41] text-[#0a192f]" : "text-slate-400")}
+            >
+              <Moon className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setMapStyle('light')}
+              className={cn("w-10 h-10 rounded-lg flex items-center justify-center transition-all", mapStyle === 'light' ? "bg-[#00ff41] text-[#0a192f]" : "text-slate-400")}
+            >
+              <Sun className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setMapStyle('satellite')}
+              className={cn("w-10 h-10 rounded-lg flex items-center justify-center transition-all", mapStyle === 'satellite' ? "bg-[#00ff41] text-[#0a192f]" : "text-slate-400")}
+            >
+              <Layers className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        {/* Drawer / Sidebar */}
+        {/* Carousel of Pending Deliveries */}
+        {!isInternalNavigating && deliveries.some(d => !d.done) && (
+          <div className="absolute bottom-20 left-0 right-0 z-20 px-4 overflow-x-auto pb-4 flex gap-3 no-scrollbar md:left-auto md:right-4 md:w-96 md:bottom-4 md:flex-col md:overflow-y-auto md:max-h-[60vh]">
+            {deliveries.filter(d => !d.done).map((p) => (
+              <motion.div
+                key={p.id}
+                layout
+                onClick={() => focusDelivery(p.id)}
+                className={cn(
+                  "min-w-[280px] p-4 rounded-3xl shadow-xl border-2 flex flex-col gap-2 transition-all cursor-pointer shrink-0",
+                  activeId === p.id 
+                    ? "border-[#00ff41] bg-[#0a192f]/90 backdrop-blur-md" 
+                    : theme === 'dark' ? "border-slate-800 bg-slate-900/80 backdrop-blur-md" : "border-slate-100 bg-white/80 backdrop-blur-md"
+                )}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded">
+                      {p.bairro}
+                    </span>
+                    <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded uppercase">
+                      #{p.order}
+                    </span>
+                  </div>
+                  {p.packageId && (
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      📦 {p.packageId}
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-sm font-black leading-tight truncate">{p.addr}</h4>
+                <div className="flex gap-2 mt-2">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNavTarget(p);
+                    }}
+                    className="flex-1 py-2 bg-[#00ff41] text-[#0a192f] rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[#00ff41]/20"
+                  >
+                    {t('navigate')}
+                  </button>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleStatus(p.id);
+                    }}
+                    className="p-2 bg-slate-800 text-slate-400 rounded-xl hover:text-white transition-colors"
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {/* Centered Info Balloon (Popup Modal) */}
         <AnimatePresence>
+          {popupDelivery && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className={cn(
+                  "w-full max-w-sm p-6 rounded-[40px] shadow-2xl border-2 pointer-events-auto",
+                  theme === 'dark' ? "bg-slate-900/95 border-slate-700 backdrop-blur-xl" : "bg-white/95 border-slate-200 backdrop-blur-xl"
+                )}
+              >
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-12 h-12 rounded-2xl flex items-center justify-center",
+                      popupDelivery.done ? "bg-slate-500/20" : "bg-emerald-500/20"
+                    )}>
+                      {popupDelivery.done ? <CheckCircle2 className="w-6 h-6 text-slate-400" /> : <MapPin className="w-6 h-6 text-emerald-400" />}
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t('delivery')} #{popupDelivery.order}</p>
+                      <p className="text-lg font-black leading-tight">{popupDelivery.bairro}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setPopupDelivery(null)}
+                    className="p-2 rounded-full bg-slate-800/50 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t('address')}</p>
+                    <p className="text-sm font-bold leading-relaxed">{popupDelivery.addr}</p>
+                  </div>
+
+                  {popupDelivery.name && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t('customer')}</p>
+                      <p className="text-sm font-bold">{popupDelivery.name}</p>
+                    </div>
+                  )}
+
+                  {popupDelivery.packageId && (
+                    <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-3 flex items-center justify-between">
+                      <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">{t('packageNumber')}</p>
+                      <p className="text-sm font-black text-orange-500">{popupDelivery.packageId}</p>
+                    </div>
+                  )}
+
+                  {popupDelivery.notes && (
+                    <div className="bg-slate-800/50 rounded-2xl p-3 border border-slate-700/50">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">📝 {t('notes')}</p>
+                      <p className="text-xs italic text-slate-400">{popupDelivery.notes}</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <button 
+                      onClick={() => {
+                        setNavTarget(popupDelivery);
+                        setPopupDelivery(null);
+                      }}
+                      className="flex-1 py-4 bg-[#00ff41] text-[#0a192f] rounded-[24px] text-xs font-black uppercase tracking-widest shadow-xl shadow-[#00ff41]/20 active:scale-95 transition-all"
+                    >
+                      {t('navigate')}
+                    </button>
+                    {!popupDelivery.done && (
+                      <button 
+                        onClick={() => {
+                          toggleStatus(popupDelivery.id);
+                          setPopupDelivery(null);
+                        }}
+                        className="p-4 bg-slate-800 text-slate-400 rounded-[24px] hover:text-white transition-all active:scale-95"
+                      >
+                        <CheckCircle2 className="w-6 h-6" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
           <motion.div
             initial={false}
             animate={{ 
-              height: isMobile ? (isDrawerExpanded ? '85vh' : '40vh') : '100%',
+              height: isMobile ? (isDrawerExpanded ? '85vh' : '15vh') : '100%',
               width: isMobile ? '100%' : '400px'
             }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             className={cn(
               "z-[1500] flex flex-col shadow-2xl transition-colors min-h-0",
-              isMobile ? "fixed bottom-0 left-0 right-0 rounded-t-3xl border-t" : "relative border-l",
-              theme === 'dark' ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
+              isMobile ? "fixed bottom-0 left-0 right-0 rounded-t-[2.5rem] border-t" : "relative border-l",
+              theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
             )}
           >
             {/* Handle for Mobile */}
             {isMobile && (
               <div 
-                className="h-10 flex items-center justify-center cursor-pointer"
+                className="h-12 flex items-center justify-center cursor-pointer"
                 onClick={() => setIsDrawerExpanded(!isDrawerExpanded)}
               >
-                <div className="w-12 h-1.5 bg-slate-600 rounded-full" />
+                <div className="w-16 h-1.5 bg-slate-700 rounded-full opacity-50" />
               </div>
             )}
 
@@ -1160,6 +1455,28 @@ export default function App() {
                       placeholder={t('routeNamePlaceholder')}
                     />
                     <div className="h-0.5 w-8 bg-[#00ff41] mt-1" />
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="px-1 mb-4">
+                    <div className={cn(
+                      "flex items-center gap-2 px-3 py-2 rounded-2xl border",
+                      theme === 'dark' ? "bg-slate-800/50 border-slate-700" : "bg-slate-100 border-slate-200"
+                    )}>
+                      <Search className="w-4 h-4 text-slate-500" />
+                      <input 
+                        type="text"
+                        placeholder={language === 'pt' ? 'Buscar pacote ou endereço...' : 'Search package or address...'}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="bg-transparent border-none outline-none text-xs w-full font-bold"
+                      />
+                      {searchQuery && (
+                        <button onClick={() => setSearchQuery("")}>
+                          <X className="w-3 h-3 text-slate-500" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Summary Section */}
@@ -1218,7 +1535,11 @@ export default function App() {
                       </div>
                     </div>
                     
-                    {deliveries.filter(d => !d.done).map((p, i) => (
+                    {deliveries.filter(d => !d.done && (
+                      d.addr.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                      (d.packageId && d.packageId.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                      (d.name && d.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                    )).map((p, i) => (
                       <motion.div
                         layout
                         key={p.id}
@@ -1387,10 +1708,16 @@ export default function App() {
                   {/* Completed Section */}
                   {deliveries.some(d => d.done) && (
                     <div className="space-y-3 pt-4 border-t border-slate-700/50">
-                      <div className="px-1">
+                      <div className="flex items-center justify-between px-1 mb-2">
                         <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
                           {language === 'pt' ? 'Concluídos' : 'Completed'} ({deliveries.filter(d => d.done).length})
                         </span>
+                        <button 
+                          onClick={exportToCircuit}
+                          className="text-[9px] font-black text-[#00ff41] border border-[#00ff41]/30 px-2 py-0.5 rounded uppercase tracking-widest hover:bg-[#00ff41]/10 transition-colors"
+                        >
+                          {t('exportCircuit')}
+                        </button>
                       </div>
                       
                       {deliveries.filter(d => d.done).map((p) => (
@@ -1410,52 +1737,30 @@ export default function App() {
                               <span className="text-[10px] font-black uppercase tracking-tighter text-slate-500 bg-slate-500/10 px-2 py-0.5 rounded">
                                 {p.bairro}
                               </span>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleType(p.id);
-                                }}
-                                title="Alterar tipo de endereço"
-                                className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-                              >
-                                {p.type === 'condominio' && <Building2 className="w-3 h-3 text-slate-500" />}
-                                {p.type === 'comercio' && <Store className="w-3 h-3 text-slate-500" />}
-                                {p.type === 'casa' && <Home className="w-3 h-3 text-slate-500" />}
-                              </button>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingDelivery(p);
-                                }}
-                                title="Editar endereço"
-                                className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-                              >
-                                <Edit className="w-3 h-3 text-slate-500" />
-                              </button>
+                              <div className="flex flex-wrap gap-1">
+                                {p.completedAt && (
+                                  <span className="text-[8px] font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded uppercase">
+                                    ✅ {p.completedAt}
+                                  </span>
+                                )}
+                                {p.stopDuration && (
+                                  <span className="text-[8px] font-bold text-blue-400 bg-blue-400/10 px-1.5 py-0.5 rounded uppercase">
+                                    ⏱️ {Math.round(p.stopDuration / 60)} min
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex flex-col items-end">
-                              <span className="text-xs font-black text-emerald-500">
-                                #{p.order} - {language === 'pt' ? 'CONCLUÍDO' : 'COMPLETED'}
-                              </span>
-                              {p.count && p.count > 1 && (
-                                <div className="flex items-center gap-1 text-[10px] font-black text-slate-500 bg-slate-500/10 px-1.5 py-0.5 rounded mt-1">
-                                  <Package className="w-2.5 h-2.5" /> {p.count}
-                                </div>
-                              )}
-                            </div>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleStatus(p.id);
+                              }}
+                              className="p-1 hover:bg-slate-700/50 rounded transition-colors text-slate-500"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
                           </div>
-                          
-                          {p.condoName && (
-                            <div className="text-xs font-black text-slate-500 uppercase mb-1 flex items-center gap-1">
-                              <span className="bg-slate-500/10 px-1.5 py-0.5 rounded opacity-50">🏢 {p.condoName}</span>
-                            </div>
-                          )}
-                          {p.name && (
-                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1 opacity-50">
-                              👤 {p.name}
-                            </div>
-                          )}
-                          <h4 className="text-sm font-semibold leading-tight mb-1 line-through text-slate-500">{p.addr}</h4>
+                          <h4 className="text-sm font-bold text-slate-400 line-through truncate mb-1">{p.addr}</h4>
                           
                           <div className="flex gap-2">
                               <button 
@@ -1491,11 +1796,81 @@ export default function App() {
               </div>
             )}
           </motion.div>
-        </AnimatePresence>
       </main>
 
-      {/* Settings Modal */}
-      <AnimatePresence>
+        {/* Manual Entry Modal */}
+        <AnimatePresence>
+          {isManualEntryOpen && (
+            <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsManualEntryOpen(false)}
+                className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className={cn(
+                  "relative w-full max-w-md p-6 rounded-[40px] shadow-2xl border",
+                  theme === 'dark' ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
+                )}
+              >
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-black uppercase tracking-widest">{language === 'pt' ? 'Adicionar Entrega' : 'Add Delivery'}</h3>
+                  <button onClick={() => setIsManualEntryOpen(false)} className="p-2 rounded-full bg-slate-800/50 text-slate-400">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">{t('fullAddress')}</label>
+                    <div className={cn(
+                      "flex items-center gap-2 px-4 py-3 rounded-2xl border",
+                      theme === 'dark' ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-200"
+                    )}>
+                      <MapPin className="w-5 h-5 text-slate-500" />
+                      <input 
+                        type="text"
+                        value={manualAddr}
+                        onChange={(e) => setManualAddr(e.target.value)}
+                        placeholder={language === 'pt' ? 'Rua, Número, Bairro...' : 'Street, Number, Neighborhood...'}
+                        className="bg-transparent border-none outline-none text-sm w-full font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button 
+                      className="flex-1 p-4 bg-slate-800 text-slate-400 rounded-2xl font-bold flex items-center justify-center gap-2"
+                      onClick={() => alert(language === 'pt' ? 'Funcionalidade de voz em breve!' : 'Voice feature coming soon!')}
+                    >
+                      <Mic className="w-5 h-5" /> {language === 'pt' ? 'Voz' : 'Voice'}
+                    </button>
+                    <button 
+                      className="flex-1 p-4 bg-slate-800 text-slate-400 rounded-2xl font-bold flex items-center justify-center gap-2"
+                      onClick={() => alert(language === 'pt' ? 'Leitura de código de barras em breve!' : 'Barcode scanning coming soon!')}
+                    >
+                      <ScanLine className="w-5 h-5" /> {language === 'pt' ? 'Código' : 'Barcode'}
+                    </button>
+                  </div>
+
+                  <button 
+                    onClick={addManualDelivery}
+                    disabled={!manualAddr}
+                    className="w-full py-4 bg-[#00ff41] text-[#0a192f] rounded-[24px] font-black uppercase tracking-widest shadow-xl shadow-[#00ff41]/20 disabled:opacity-50"
+                  >
+                    {language === 'pt' ? 'ADICIONAR À ROTA' : 'ADD TO ROUTE'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
         {isSettingsOpen && (
           <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4">
             <motion.div
@@ -1781,12 +2156,17 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => {
-                    toggleStatus(navTarget.id);
-                    setIsInternalNavigating(false);
-                    setNavRouteGeometry(null);
-                    if (routePolylineRef.current) {
-                      routePolylineRef.current.remove();
-                      routePolylineRef.current = null;
+                    const d = deliveries.find(x => x.id === navTarget.id);
+                    if (d && !d.arrivedAt) {
+                      markArrived(navTarget.id);
+                    } else {
+                      toggleStatus(navTarget.id);
+                      setIsInternalNavigating(false);
+                      setNavRouteGeometry(null);
+                      if (routePolylineRef.current) {
+                        routePolylineRef.current.remove();
+                        routePolylineRef.current = null;
+                      }
                     }
                   }}
                   className={cn(
@@ -1794,7 +2174,7 @@ export default function App() {
                     navProfile === 'foot-walking' ? "bg-blue-500 text-white" : "bg-[#00ff41] text-[#0a192f]"
                   )}
                 >
-                  {t('arrived')}
+                  {deliveries.find(x => x.id === navTarget.id)?.arrivedAt ? t('save') : t('arrived')}
                 </button>
               </div>
             </div>
@@ -2028,10 +2408,8 @@ export default function App() {
                     
                     <button 
                       onClick={() => {
-                        if (window.confirm(language === 'pt' ? 'Excluir esta entrega da rota?' : 'Delete this delivery from route?')) {
-                          setDeliveries(deliveries.filter(d => d.id !== editingDelivery.id));
-                          setEditingDelivery(null);
-                        }
+                        setDeliveries(deliveries.filter(d => d.id !== editingDelivery.id));
+                        setEditingDelivery(null);
                       }}
                       className="w-full py-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-black text-sm transition-all border border-red-500/20 active:scale-[0.98]"
                     >
