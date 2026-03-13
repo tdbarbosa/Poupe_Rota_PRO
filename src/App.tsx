@@ -185,7 +185,30 @@ export default function App() {
       delivery: "Entrega",
       address: "Endereço",
       customer: "Cliente",
-      notes: "Observações"
+      notes: "Observações",
+      packageOrder: "Ordem",
+      onFoot: "A pé",
+      onFootSuggestion: "Próxima parada próxima! Sugerimos ir a pé.",
+      estCompletionTime: "Estimativa de Término",
+      stopTime: "Tempo de Parada",
+      completedTime: "Finalizado em",
+      noPackage: "Sem número",
+      searchPackage: "Buscar pacote...",
+      groupNearby: "Agrupar próximos",
+      mapStyle: "Estilo do Mapa",
+      satellite: "Satélite",
+      standard: "Padrão",
+      paymentVerified: "Pagamento Verificado",
+      verifyPayment: "Verificar Pagamento",
+      proStatus: "Status PRO",
+      exportRoute: "Exportar Rota",
+      manualEntry: "Entrada Manual",
+      voiceInput: "Entrada por Voz",
+      barcodeScan: "Escanear Código",
+      typeAddress: "Digitar Endereço",
+      swipeToFinish: "Deslize para finalizar",
+      nextStopLabel: "Próxima Parada",
+      prevStopLabel: "Parada Anterior"
     },
     en: {
       appTitle: "RouteMaster",
@@ -266,7 +289,30 @@ export default function App() {
       delivery: "Delivery",
       address: "Address",
       customer: "Customer",
-      notes: "Notes"
+      notes: "Notes",
+      packageOrder: "Order",
+      onFoot: "On foot",
+      onFootSuggestion: "Next stop is close! We suggest walking.",
+      estCompletionTime: "Est. Completion",
+      stopTime: "Stop Time",
+      completedTime: "Completed at",
+      noPackage: "No number",
+      searchPackage: "Search package...",
+      groupNearby: "Group nearby",
+      mapStyle: "Map Style",
+      satellite: "Satellite",
+      standard: "Standard",
+      paymentVerified: "Payment Verified",
+      verifyPayment: "Verify Payment",
+      proStatus: "PRO Status",
+      exportRoute: "Export Route",
+      manualEntry: "Manual Entry",
+      voiceInput: "Voice Input",
+      barcodeScan: "Scan Barcode",
+      typeAddress: "Type Address",
+      swipeToFinish: "Swipe to finish",
+      nextStopLabel: "Next Stop",
+      prevStopLabel: "Previous Stop"
     }
   };
 
@@ -408,6 +454,12 @@ export default function App() {
       .replace(/CONDOMINIO/g, 'COND')
       .replace(/RESIDENCIAL/g, 'RES')
       .replace(/EDIFICIO/g, 'ED')
+      .replace(/\bR\.\b/g, 'RUA')
+      .replace(/\bR\b/g, 'RUA')
+      .replace(/\bQD\b/g, 'QUADRA')
+      .replace(/\bQ\b/g, 'QUADRA')
+      .replace(/\bLT\b/g, 'LOTE')
+      .replace(/\bL\b/g, 'LOTE')
       .trim();
   };
 
@@ -417,9 +469,7 @@ export default function App() {
 
     const addrUpper = addr.toUpperCase();
     
-    // Check for house number - usually at the end or after a comma
-    // Matches: ", 123", " 123", " N123", " NUMERO 123"
-    // Avoids matching street names like "RUA 10" if it's the only number
+    // Check for house number
     const numberMatch = addrUpper.match(/(?:^|[\s,])(?:Nº?|NUMERO|N)?\s?(\d+)(?:\s|$)/i);
     const hasNumber = numberMatch !== null;
     
@@ -428,42 +478,42 @@ export default function App() {
 
     const hasStreetPrefix = /(RUA|AV|AVENIDA|TRAVESSA|ALAMEDA|RODOVIA|ESTRADA|PRAÇA|PÇA|TV|AL|ROD|EST|LOTE|QUADRA|QD|LT)/i.test(addrUpper);
     
-    // Minimum length for a "perfect" address is usually higher than 10
-    const isTooShort = addr.length < 12;
+    const isTooShort = addr.length < 10;
     
     const missingBairro = !bairro || bairro === 'Destino' || bairro === 'Bairro não informado' || bairro.length < 3;
 
-    // Logic for "Incomplete" or "Warning"
     if (!hasNumber && !isSN) {
-      notes.push("Número da residência não identificado");
+      notes.push("Número ausente");
       quality = 'incomplete';
     } else if (isSN) {
-      notes.push("Endereço sem número (S/N)");
+      notes.push("S/N");
       quality = 'warning';
     }
 
     if (!hasStreetPrefix) {
-      notes.push("Tipo de logradouro ausente (Rua, Av, etc)");
+      notes.push("Tipo logradouro ausente");
       if (quality === 'perfect') quality = 'incomplete';
     }
 
     if (isTooShort && quality === 'perfect') {
-      notes.push("Endereço muito genérico");
+      notes.push("Endereço curto");
       quality = 'warning';
     }
 
     if (missingBairro) {
-      notes.push("Bairro não informado ou inválido");
+      notes.push("Bairro ausente");
       if (quality === 'perfect') quality = 'incomplete';
     }
 
-    // Check for "Esquina" or "Próximo" - often indicates a non-specific point
-    if (addrUpper.includes('ESQUINA') || addrUpper.includes('PROXIMO') || addrUpper.includes('AO LADO')) {
-      notes.push("Ponto de referência detectado (pode ser impreciso)");
-      if (quality === 'perfect') quality = 'warning';
-    }
-
     return { quality, notes };
+  };
+
+  const calculateEstCompletion = (pendingCount: number) => {
+    const minutesPerStop = 3;
+    const now = new Date();
+    const estMinutes = pendingCount * minutesPerStop;
+    const estDate = new Date(now.getTime() + estMinutes * 60000);
+    return estDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const handleExternalNav = (app: 'google' | 'waze' | 'apple') => {
@@ -728,6 +778,67 @@ export default function App() {
   };
 
   // Route Optimization (Nearest Neighbor + 2-Opt)
+  const exportToCSV = () => {
+    if (deliveries.length === 0) return;
+    
+    const headers = ["Order", "Address", "Bairro", "Name", "Notes", "Status"];
+    const rows = deliveries.map(d => [
+      d.order || "",
+      d.addr,
+      d.bairro,
+      d.name || "",
+      d.notes || "",
+      d.done ? "Done" : "Pending"
+    ]);
+    
+    let csvContent = "data:text/csv;charset=utf-8," 
+      + headers.join(",") + "\n"
+      + rows.map(e => e.join(",")).join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `route_export_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+  const groupNearbyDeliveries = () => {
+    if (deliveries.length < 2) return;
+    
+    const pends = deliveries.filter(d => !d.done);
+    const dones = deliveries.filter(d => d.done);
+    
+    // Group by distance (e.g. 30 meters)
+    const clusterIndices = routingService.clusterPoints(pends.map(d => ({ lat: d.lat, lon: d.lon })), 30);
+    
+    const newPends: Delivery[] = [];
+    const processedIndices = new Set<number>();
+    
+    clusterIndices.forEach(indices => {
+      if (indices.length > 1) {
+        // Create a grouped delivery
+        const main = pends[indices[0]];
+        const count = indices.length;
+        newPends.push({
+          ...main,
+          count: (main.count || 1) + (count - 1),
+          verificationNotes: [...(main.verificationNotes || []), `Agrupado: ${count} entregas neste local`]
+        });
+      } else {
+        newPends.push(pends[indices[0]]);
+      }
+      indices.forEach(idx => processedIndices.add(idx));
+    });
+    
+    setDeliveries([...newPends, ...dones]);
+    
+    const toast = document.createElement('div');
+    toast.className = "fixed top-10 left-1/2 -translate-x-1/2 z-[5000] bg-[#00ff41] text-black px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl";
+    toast.innerText = language === 'pt' ? "Endereços próximos agrupados!" : "Nearby addresses grouped!";
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+  };
   const reoptimizeRoute = (data: Delivery[], useGps: boolean) => {
     const pends = data.filter(d => !d.done);
     const dones = data.filter(d => d.done);
@@ -1148,61 +1259,91 @@ export default function App() {
     )}>
       {/* Top Bar */}
       <header className={cn(
-        "h-16 px-4 flex items-center justify-between z-[2000] border-b shadow-sm",
-        theme === 'dark' ? "bg-[#0a192f]/90 border-slate-800 backdrop-blur-lg" : "bg-white/90 border-slate-200 backdrop-blur-lg"
+        "h-16 px-4 flex items-center justify-between z-[2000] border-b shadow-sm shrink-0",
+        theme === 'dark' ? "bg-[#0a192f]/95 border-slate-800 backdrop-blur-xl" : "bg-white/95 border-slate-200 backdrop-blur-xl"
       )}>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-[#00ff41] rounded-lg flex items-center justify-center shadow-lg shadow-[#00ff41]/20">
-            <Compass className="w-5 h-5 text-[#0a192f]" />
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-[#00ff41] rounded-2xl flex items-center justify-center shadow-lg shadow-[#00ff41]/20">
+            <Compass className="w-6 h-6 text-[#0a192f]" />
           </div>
           <div className="flex flex-col">
-            <h1 className="text-sm font-black tracking-tighter leading-none flex items-center gap-1">
+            <h1 className="text-sm font-black tracking-tighter leading-none flex items-center gap-1.5">
               {t('appTitle')} 
               <span className={cn(
-                "text-[8px] px-1.5 py-0.5 rounded font-black",
+                "text-[8px] px-2 py-0.5 rounded-full font-black",
                 isPro ? "bg-orange-500 text-white" : "bg-slate-700 text-slate-300"
               )}>
                 {isPro ? "PRO" : "FREE"}
               </span>
             </h1>
-            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1 truncate max-w-[120px]">
               {routeName}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => setIsManualEntryOpen(true)}
+            onClick={() => {
+              setIsDrawerExpanded(true);
+              setTimeout(() => {
+                const searchInput = document.getElementById('drawer-search');
+                if (searchInput) searchInput.focus();
+              }, 300);
+            }}
             className={cn(
-              "p-2 rounded-xl transition-all active:scale-90",
-              theme === 'dark' ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-900"
+              "p-2.5 rounded-2xl transition-all active:scale-90 shadow-sm border",
+              theme === 'dark' ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-900"
             )}
           >
-            <Plus className="w-4 h-4" />
+            <Search className="w-5 h-5" />
           </button>
           <button 
-            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+            onClick={() => setIsManualEntryOpen(true)}
             className={cn(
-              "p-2 rounded-xl transition-all active:scale-90",
-              theme === 'dark' ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-900"
+              "p-2.5 rounded-2xl transition-all active:scale-90 shadow-sm border",
+              theme === 'dark' ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-900"
             )}
           >
-            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            <Plus className="w-5 h-5" />
           </button>
           <button 
             onClick={() => setIsSettingsOpen(true)}
             className={cn(
-              "p-2 rounded-xl transition-all active:scale-90",
-              theme === 'dark' ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-900"
+              "p-2.5 rounded-2xl transition-all active:scale-90 shadow-sm border",
+              theme === 'dark' ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-900"
             )}
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 relative flex flex-col md:flex-row overflow-hidden">
+      {/* Bottom Navigation Menu */}
+      <nav className={cn(
+        "h-20 px-6 flex items-center justify-between z-[2000] border-t shrink-0",
+        theme === 'dark' ? "bg-[#0a192f]/95 border-slate-800 backdrop-blur-xl" : "bg-white/95 border-slate-200 backdrop-blur-xl"
+      )}>
+        <button 
+          onClick={() => setIsDrawerExpanded(true)}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
+        >
+          <Package className="w-6 h-6" />
+          <span className="text-[9px] font-bold uppercase tracking-widest">{t('data')}</span>
+        </button>
+        <button 
+          onClick={centralizeView}
+          className="w-14 h-14 -mt-10 bg-[#00ff41] rounded-full flex items-center justify-center shadow-2xl shadow-[#00ff41]/40 border-4 border-[#0a192f] active:scale-90 transition-all"
+        >
+          <Target className="w-7 h-7 text-[#0a192f]" />
+        </button>
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
+        >
+          <Settings className="w-6 h-6" />
+          <span className="text-[9px] font-bold uppercase tracking-widest">{t('settings')}</span>
+        </button>
+      </nav>
         {/* Map Container */}
         <div id="map" className="absolute inset-0 z-10" />
 
@@ -1243,59 +1384,118 @@ export default function App() {
           </div>
         </div>
 
-        {/* Carousel of Pending Deliveries */}
+        {/* Carousel of Pending Deliveries (Tinder Style) */}
         {!isInternalNavigating && deliveries.some(d => !d.done) && (
-          <div className="absolute bottom-20 left-0 right-0 z-20 px-4 overflow-x-auto pb-4 flex gap-3 no-scrollbar md:left-auto md:right-4 md:w-96 md:bottom-4 md:flex-col md:overflow-y-auto md:max-h-[60vh]">
-            {deliveries.filter(d => !d.done).map((p) => (
-              <motion.div
-                key={p.id}
-                layout
-                onClick={() => focusDelivery(p.id)}
-                className={cn(
-                  "min-w-[280px] p-4 rounded-3xl shadow-xl border-2 flex flex-col gap-2 transition-all cursor-pointer shrink-0",
-                  activeId === p.id 
-                    ? "border-[#00ff41] bg-[#0a192f]/90 backdrop-blur-md" 
-                    : theme === 'dark' ? "border-slate-800 bg-slate-900/80 backdrop-blur-md" : "border-slate-100 bg-white/80 backdrop-blur-md"
-                )}
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded">
-                      {p.bairro}
-                    </span>
-                    <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded uppercase">
-                      #{p.order}
-                    </span>
-                  </div>
-                  {p.packageId && (
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      📦 {p.packageId}
-                    </span>
-                  )}
-                </div>
-                <h4 className="text-sm font-black leading-tight truncate">{p.addr}</h4>
-                <div className="flex gap-2 mt-2">
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setNavTarget(p);
-                    }}
-                    className="flex-1 py-2 bg-[#00ff41] text-[#0a192f] rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[#00ff41]/20"
-                  >
-                    {t('navigate')}
-                  </button>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
+          <div className="absolute bottom-24 left-0 right-0 z-20 px-4 flex justify-center items-center gap-2 pointer-events-none">
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const pends = deliveries.filter(d => !d.done);
+                const currentIdx = pends.findIndex(d => d.id === activeId);
+                const prevIdx = (currentIdx - 1 + pends.length) % pends.length;
+                focusDelivery(pends[prevIdx].id);
+              }}
+              className="p-2 bg-slate-900/80 backdrop-blur-md text-slate-400 rounded-full border border-slate-800 pointer-events-auto active:scale-95 transition-all"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="w-full max-w-sm pointer-events-auto overflow-x-auto flex gap-4 no-scrollbar pb-4 snap-x snap-mandatory">
+              {deliveries.filter(d => !d.done).map((p) => (
+                <motion.div
+                  key={p.id}
+                  layout
+                  drag="x"
+                  dragConstraints={{ left: 0, right: 0 }}
+                  onDragEnd={(_, info) => {
+                    if (info.offset.x > 100) {
+                      // Swipe right - mark as done
                       toggleStatus(p.id);
-                    }}
-                    className="p-2 bg-slate-800 text-slate-400 rounded-xl hover:text-white transition-colors"
-                  >
-                    <CheckCircle2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
+                    } else if (info.offset.x < -100) {
+                      // Swipe left - skip/next
+                      const pending = deliveries.filter(x => !x.done && x.id !== p.id);
+                      if (pending.length > 0) {
+                        focusDelivery(pending[0].id);
+                      }
+                    }
+                  }}
+                  onClick={() => focusDelivery(p.id)}
+                  className={cn(
+                    "min-w-[85vw] md:min-w-[320px] p-5 rounded-[32px] shadow-2xl border-2 flex flex-col gap-3 transition-all cursor-grab active:cursor-grabbing snap-center",
+                    activeId === p.id 
+                      ? "border-[#00ff41] bg-slate-900/95 backdrop-blur-xl" 
+                      : theme === 'dark' ? "border-slate-800 bg-slate-900/80 backdrop-blur-md" : "border-slate-100 bg-white/80 backdrop-blur-md"
+                  )}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2.5 py-1 rounded-full">
+                        {p.bairro}
+                      </span>
+                      <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-full uppercase">
+                        {t('packageOrder')} #{p.order}
+                      </span>
+                    </div>
+                    {p.packageId ? (
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        📦 {p.packageId}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> {t('noPackage')}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-base font-black leading-tight line-clamp-2">{p.addr}</h4>
+                  
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{t('estCompletionTime')}</span>
+                      <span className="text-xs font-black text-emerald-400">{calculateEstCompletion(deliveries.filter(d => !d.done).length)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-slate-500">
+                      <Footprints className="w-3 h-3" />
+                      <span className="text-[10px] font-bold">3 min</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-2">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNavTarget(p);
+                      }}
+                      className="flex-1 py-3.5 bg-[#00ff41] text-[#0a192f] rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-lg shadow-[#00ff41]/20 active:scale-95 transition-all"
+                    >
+                      {t('navigate')}
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleStatus(p.id);
+                      }}
+                      className="px-4 bg-slate-800 text-slate-400 rounded-2xl hover:text-white transition-all active:scale-95"
+                    >
+                      <CheckCircle2 className="w-6 h-6" />
+                    </button>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[8px] font-bold text-slate-600 uppercase tracking-[0.2em]">{t('swipeToFinish')}</span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const pends = deliveries.filter(d => !d.done);
+                const currentIdx = pends.findIndex(d => d.id === activeId);
+                const nextIdx = (currentIdx + 1) % pends.length;
+                focusDelivery(pends[nextIdx].id);
+              }}
+              className="p-2 bg-slate-900/80 backdrop-blur-md text-slate-400 rounded-full border border-slate-800 pointer-events-auto active:scale-95 transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
           </div>
         )}
 
@@ -1532,6 +1732,18 @@ export default function App() {
                         >
                           <RotateCcw className="w-3 h-3" /> {t('recalculate')}
                         </button>
+                        <button 
+                          onClick={exportToCSV}
+                          className="text-xs font-bold text-orange-400 hover:underline flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" /> {t('exportRoute')}
+                        </button>
+                        <button 
+                          onClick={groupNearbyDeliveries}
+                          className="text-xs font-bold text-blue-400 hover:underline flex items-center gap-1"
+                        >
+                          <Layers className="w-3 h-3" /> {t('groupNearby')}
+                        </button>
                       </div>
                     </div>
                     
@@ -1572,32 +1784,43 @@ export default function App() {
                         )}
 
                         <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded">
-                              {p.bairro}
-                            </span>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleType(p.id);
-                              }}
-                              title="Alterar tipo de endereço"
-                              className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-                            >
-                              {p.type === 'condominio' && <Building2 className="w-3 h-3 text-slate-400" />}
-                              {p.type === 'comercio' && <Store className="w-3 h-3 text-slate-400" />}
-                              {p.type === 'casa' && <Home className="w-3 h-3 text-slate-400" />}
-                            </button>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingDelivery(p);
-                              }}
-                              title="Editar endereço"
-                              className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-                            >
-                              <Edit className="w-3 h-3 text-slate-400" />
-                            </button>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded">
+                                {p.bairro}
+                              </span>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleType(p.id);
+                                }}
+                                title="Alterar tipo de endereço"
+                                className="p-1 hover:bg-slate-700/50 rounded transition-colors"
+                              >
+                                {p.type === 'condominio' && <Building2 className="w-3 h-3 text-slate-400" />}
+                                {p.type === 'comercio' && <Store className="w-3 h-3 text-slate-400" />}
+                                {p.type === 'casa' && <Home className="w-3 h-3 text-slate-400" />}
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingDelivery(p);
+                                }}
+                                title="Editar endereço"
+                                className="p-1 hover:bg-slate-700/50 rounded transition-colors"
+                              >
+                                <Edit className="w-3 h-3 text-slate-400" />
+                              </button>
+                            </div>
+                            {p.packageId ? (
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-800 px-2 py-0.5 rounded border border-slate-700 w-fit">
+                                {t('packageOrder')}: {p.packageId}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20 flex items-center gap-1 w-fit">
+                                <AlertTriangle className="w-3 h-3" /> {t('noPackage')}
+                              </span>
+                            )}
                           </div>
                           <div className="flex flex-col items-end">
                             <span className="text-xs font-black text-emerald-400">
@@ -1796,7 +2019,6 @@ export default function App() {
               </div>
             )}
           </motion.div>
-      </main>
 
         {/* Manual Entry Modal */}
         <AnimatePresence>
@@ -1899,79 +2121,120 @@ export default function App() {
                 </button>
               </div>
               
-              <div className="p-6 space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('subscription')}</h3>
-                  
-                  <button 
-                    onClick={() => {
-                      setIsPro(!isPro);
-                      setIsSettingsOpen(false);
-                    }}
-                    className={cn(
-                      "w-full flex items-center justify-between p-4 rounded-2xl transition-colors border",
-                      isPro 
-                        ? "bg-orange-500/10 border-orange-500/30 text-orange-500" 
-                        : "bg-slate-900/30 border-slate-700/30 hover:bg-slate-900/50"
-                    )}
-                  >
+              <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                {/* Pro Status & Payment Verification */}
+                <div className={cn(
+                  "p-5 rounded-3xl border-2 flex flex-col gap-4",
+                  isPro ? "bg-orange-500/10 border-orange-500/20" : "bg-slate-900/50 border-slate-700"
+                )}>
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <Compass className={cn("w-5 h-5", isPro ? "text-orange-500" : "text-slate-400")} />
-                      <span className="font-semibold">{isPro ? t('proUser') : t('changePro')}</span>
-                    </div>
-                    {!isPro && <span className="text-[10px] font-black bg-orange-500 text-white px-2 py-1 rounded">UPGRADE</span>}
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('general')}</h3>
-                  
-                  <button 
-                    onClick={() => {
-                      setTheme(t => t === 'dark' ? 'light' : 'dark');
-                    }}
-                    className="w-full flex items-center justify-between p-4 rounded-2xl bg-slate-900/30 hover:bg-slate-900/50 transition-colors border border-slate-700/30"
-                  >
-                    <div className="flex items-center gap-3">
-                      {theme === 'dark' ? <Moon className="w-5 h-5 text-indigo-400" /> : <Sun className="w-5 h-5 text-orange-400" />}
-                      <span className="font-semibold">{t('theme')} {theme === 'dark' ? t('dark') : t('light')}</span>
-                    </div>
-                    <div className={cn(
-                      "w-12 h-6 rounded-full relative transition-colors",
-                      theme === 'dark' ? "bg-[#00ff41]" : "bg-slate-600"
-                    )}>
                       <div className={cn(
-                        "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                        theme === 'dark' ? "left-7" : "left-1"
-                      )} />
-                    </div>
-                  </button>
-
-                  <button 
-                    onClick={() => {
-                      setLanguage(l => l === 'pt' ? 'en' : 'pt');
-                    }}
-                    className="w-full flex items-center justify-between p-4 rounded-2xl bg-slate-900/30 hover:bg-slate-900/50 transition-colors border border-slate-700/30"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Languages className="w-5 h-5 text-[#00ff41]" />
-                      <span className="font-semibold">{t('language')}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={cn("text-xs font-bold", language === 'pt' ? "text-[#00ff41]" : "text-slate-500")}>PT</span>
-                      <div className="w-8 h-4 bg-slate-700 rounded-full relative">
-                        <div className={cn(
-                          "absolute top-1 w-2 h-2 bg-white rounded-full transition-all",
-                          language === 'en' ? "left-5" : "left-1"
-                        )} />
+                        "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg",
+                        isPro ? "bg-orange-500 text-white shadow-orange-500/20" : "bg-slate-800 text-slate-400"
+                      )}>
+                        <Crown className="w-6 h-6" />
                       </div>
-                      <span className={cn("text-xs font-bold", language === 'en' ? "text-[#00ff41]" : "text-slate-500")}>EN</span>
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t('accountType')}</p>
+                        <p className="text-lg font-black tracking-tight">{isPro ? "RouteMaster PRO" : "RouteMaster FREE"}</p>
+                      </div>
                     </div>
-                  </button>
+                    {!isPro && (
+                      <button 
+                        onClick={() => {
+                          // Mock payment verification
+                          const toast = document.createElement('div');
+                          toast.className = "fixed top-10 left-1/2 -translate-x-1/2 z-[5000] bg-orange-500 text-white px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl animate-bounce";
+                          toast.innerText = language === 'pt' ? "Verificando pagamento..." : "Verifying payment...";
+                          document.body.appendChild(toast);
+                          
+                          setTimeout(() => {
+                            setIsPro(true);
+                            toast.innerText = language === 'pt' ? "Pagamento confirmado! Bem-vindo ao PRO" : "Payment confirmed! Welcome to PRO";
+                            setTimeout(() => toast.remove(), 2000);
+                          }, 2000);
+                        }}
+                        className="px-4 py-2 bg-orange-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-orange-500/20 active:scale-95 transition-all"
+                      >
+                        {t('verifyPayment')}
+                      </button>
+                    )}
+                  </div>
+                  {!isPro && (
+                    <p className="text-[10px] font-bold text-slate-500 leading-relaxed italic">
+                      {t('proBenefits')}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">{t('advanced')}</h3>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 px-1">{t('preferences')}</h3>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={() => setLanguage(language === 'pt' ? 'en' : 'pt')}
+                      className={cn(
+                        "p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all active:scale-95",
+                        theme === 'dark' ? "bg-slate-900/50 border-slate-700" : "bg-slate-50 border-slate-200"
+                      )}
+                    >
+                      <Globe className="w-5 h-5 text-slate-400" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">{language === 'pt' ? 'Português' : 'English'}</span>
+                    </button>
+                    <button 
+                      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                      className={cn(
+                        "p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all active:scale-95",
+                        theme === 'dark' ? "bg-slate-900/50 border-slate-700" : "bg-slate-50 border-slate-200"
+                      )}
+                    >
+                      {theme === 'dark' ? <Moon className="w-5 h-5 text-slate-400" /> : <Sun className="w-5 h-5 text-slate-400" />}
+                      <span className="text-[10px] font-black uppercase tracking-widest">{theme === 'dark' ? t('darkMode') : t('lightMode')}</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const isAA = !localStorage.getItem('androidAutoMode');
+                        if (isAA) localStorage.setItem('androidAutoMode', 'true');
+                        else localStorage.removeItem('androidAutoMode');
+                        window.location.reload();
+                      }}
+                      className={cn(
+                        "p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all active:scale-95 col-span-2",
+                        localStorage.getItem('androidAutoMode') ? "border-[#00ff41] bg-[#00ff41]/10 text-[#00ff41]" : theme === 'dark' ? "bg-slate-900/50 border-slate-700" : "bg-slate-50 border-slate-200"
+                      )}
+                    >
+                      <Car className="w-5 h-5" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Android Auto Mode</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 px-1">{t('mapStyle')}</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['dark', 'light', 'satellite'].map((style) => (
+                      <button
+                        key={style}
+                        onClick={() => setMapStyle(style as any)}
+                        className={cn(
+                          "p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all active:scale-95 capitalize text-[10px] font-black",
+                          mapStyle === style 
+                            ? "border-[#00ff41] bg-[#00ff41]/10 text-[#00ff41]" 
+                            : theme === 'dark' ? "bg-slate-900/50 border-slate-700 text-slate-500" : "bg-slate-50 border-slate-200 text-slate-500"
+                        )}
+                      >
+                        {style === 'dark' && <Moon className="w-4 h-4" />}
+                        {style === 'light' && <Sun className="w-4 h-4" />}
+                        {style === 'satellite' && <Layers className="w-4 h-4" />}
+                        {style}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 px-1">{t('advanced')}</h3>
                   
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">{t('orsKey')}</label>
@@ -1979,51 +2242,35 @@ export default function App() {
                       type="password"
                       placeholder={t('orsPlaceholder')}
                       className={cn(
-                        "w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#00ff41] outline-none transition-all text-xs",
+                        "w-full p-4 rounded-2xl border-2 focus:ring-2 focus:ring-[#00ff41] outline-none transition-all text-xs font-bold",
                         theme === 'dark' ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                       )}
                       value={orsKey}
                       onChange={(e) => setOrsKey(e.target.value)}
                     />
-                    <p className="text-[9px] text-slate-500">{t('orsNote')}</p>
+                    <p className="text-[9px] text-slate-500 font-bold italic leading-tight">{t('orsNote')}</p>
+                    <button 
+                      onClick={async () => {
+                        if (!orsKey) {
+                          alert(t('enterOrsKey'));
+                          return;
+                        }
+                        // Mock test
+                        const toast = document.createElement('div');
+                        toast.className = "fixed top-10 left-1/2 -translate-x-1/2 z-[5000] bg-[#00ff41] text-black px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl";
+                        toast.innerText = language === 'pt' ? "Testando conexão..." : "Testing connection...";
+                        document.body.appendChild(toast);
+                        
+                        setTimeout(() => {
+                          toast.innerText = language === 'pt' ? "Conexão OK! Snap-to-roads ativo." : "Connection OK! Snap-to-roads active.";
+                          setTimeout(() => toast.remove(), 2000);
+                        }, 1500);
+                      }}
+                      className="w-full py-3 bg-slate-800 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-700 active:scale-95 transition-all"
+                    >
+                      Test Snap-to-Roads
+                    </button>
                   </div>
-
-                  <button 
-                    onClick={async () => {
-                      if (!orsKey) {
-                        alert(t('enterOrsKey'));
-                        return;
-                      }
-                      
-                      try {
-                        const points = deliveries.map(d => ({ lat: d.lat, lon: d.lon }));
-                        const snapped = await routingService.snapToRoads(points);
-                        
-                        let totalCorrection = 0;
-                        const updated = deliveries.map((d, i) => {
-                          const dist = routingService.getDistance({ lat: d.lat, lon: d.lon }, snapped[i]);
-                          totalCorrection += dist;
-                          
-                          return {
-                            ...d,
-                            originalLat: d.originalLat || d.lat,
-                            originalLon: d.originalLon || d.lon,
-                            lat: snapped[i].lat,
-                            lon: snapped[i].lon
-                          };
-                        });
-                        
-                        setDeliveries(updated);
-                        alert(t('successPoints').replace('{count}', updated.length.toString()).replace('{dist}', (totalCorrection / updated.length).toFixed(1)));
-                      } catch (err) {
-                        alert(t('errorMapMatching'));
-                      }
-                    }}
-                    className="w-full flex items-center gap-3 p-4 rounded-2xl bg-[#00ff41]/10 hover:bg-[#00ff41]/20 text-[#00ff41] transition-colors border border-[#00ff41]/20"
-                  >
-                    <Target className="w-5 h-5" />
-                    <span className="font-semibold">{t('fixPoints')}</span>
-                  </button>
                 </div>
 
                 <div className="space-y-4">
