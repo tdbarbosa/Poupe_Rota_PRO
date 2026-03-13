@@ -38,7 +38,11 @@ import {
   Footprints,
   Car,
   Mic,
-  ScanLine
+  ScanLine,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Route
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -156,7 +160,7 @@ export default function App() {
       driving: "Carro",
       suggestWalking: "Próximo! Sugerimos ir a pé.",
       routeNameLabel: "Nome da Rota",
-      packageNumber: "Ordem",
+      packageNumber: "Pacote",
       completedAt: "Finalizado em",
       stopDuration: "Tempo de Parada",
       estCompletion: "Estimativa de Término",
@@ -186,7 +190,7 @@ export default function App() {
       address: "Endereço",
       customer: "Cliente",
       notes: "Observações",
-      packageOrder: "Ordem",
+      packageOrder: "Pacote",
       onFoot: "A pé",
       onFootSuggestion: "Próxima parada próxima! Sugerimos ir a pé.",
       estCompletionTime: "Estimativa de Término",
@@ -606,13 +610,20 @@ export default function App() {
 
     const urlDark = 'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png';
     const urlLight = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const urlSatellite = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
     
-    const tiles = L.tileLayer(theme === 'dark' ? urlDark : urlLight).addTo(mapRef.current);
+    let url = urlDark;
+    if (mapStyle === 'light') url = urlLight;
+    if (mapStyle === 'satellite') url = urlSatellite;
+    
+    const tiles = L.tileLayer(url, {
+      attribution: mapStyle === 'satellite' ? 'Tiles &copy; Esri' : '&copy; OpenStreetMap'
+    }).addTo(mapRef.current);
 
     return () => {
       tiles.remove();
     };
-  }, [theme]);
+  }, [mapStyle]);
 
   // Handle Mobile Detection
   useEffect(() => {
@@ -704,7 +715,7 @@ export default function App() {
         // Prioritize actual address fields over "local" or "nome"
         const addrFields = ['endereco', 'endereço', 'address', 'destination address', 'logradouro', 'rua'];
         const nameFields = ['local', 'destino', 'ponto', 'nome', 'cliente', 'nome do cliente'];
-        const packageFields = ['sequencia', 'sequência', 'ordem', 'pacote', 'id pacote', 'package id', 'package'];
+        const packageFields = ['sequencia', 'sequência', 'ordem', 'pacote', 'id pacote', 'package id', 'package', 'sequence'];
         
         const rawAddr = getVal(addrFields) || getVal(nameFields) || r.Endereco || r.address || r.ENDERECO || "Endereço não informado";
         const rawName = getVal(nameFields) || r.Nome || r.Cliente || r.CLIENTE;
@@ -1264,7 +1275,7 @@ export default function App() {
       )}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-[#00ff41] rounded-2xl flex items-center justify-center shadow-lg shadow-[#00ff41]/20">
-            <Compass className="w-6 h-6 text-[#0a192f]" />
+            <Route className="w-6 h-6 text-[#0a192f]" />
           </div>
           <div className="flex flex-col">
             <h1 className="text-sm font-black tracking-tighter leading-none flex items-center gap-1.5">
@@ -1386,7 +1397,7 @@ export default function App() {
 
         {/* Carousel of Pending Deliveries (Tinder Style) */}
         {!isInternalNavigating && deliveries.some(d => !d.done) && (
-          <div className="absolute bottom-24 left-0 right-0 z-20 px-4 flex justify-center items-center gap-2 pointer-events-none">
+          <div className="absolute bottom-32 left-0 right-0 z-[1600] px-4 flex justify-center items-center gap-2 pointer-events-none">
             <button 
               onClick={(e) => {
                 e.stopPropagation();
@@ -1452,9 +1463,20 @@ export default function App() {
                       <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{t('estCompletionTime')}</span>
                       <span className="text-xs font-black text-emerald-400">{calculateEstCompletion(deliveries.filter(d => !d.done).length)}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-slate-500">
-                      <Footprints className="w-3 h-3" />
-                      <span className="text-[10px] font-bold">3 min</span>
+                    <div className="flex flex-col items-end">
+                      {p.arrivedAt ? (
+                        <div className="flex flex-col items-end">
+                          <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">{t('stopTime')}</span>
+                          <span className="text-xs font-black text-blue-400 animate-pulse">
+                            {Math.floor((new Date().getTime() - new Date(p.arrivedAt).getTime()) / 60000)} min
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-slate-500">
+                          <Footprints className="w-3 h-3" />
+                          <span className="text-[10px] font-bold">3 min</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1557,6 +1579,21 @@ export default function App() {
                     <div className="bg-slate-800/50 rounded-2xl p-3 border border-slate-700/50">
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">📝 {t('notes')}</p>
                       <p className="text-xs italic text-slate-400">{popupDelivery.notes}</p>
+                    </div>
+                  )}
+
+                  {popupDelivery.done && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3">
+                        <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">{t('completedTime')}</p>
+                        <p className="text-sm font-black text-emerald-500">{popupDelivery.completedAt}</p>
+                      </div>
+                      {popupDelivery.stopDuration && (
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3">
+                          <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">{t('stopTime')}</p>
+                          <p className="text-sm font-black text-blue-500">{Math.round(popupDelivery.stopDuration / 60)} min</p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1821,6 +1858,11 @@ export default function App() {
                                 <AlertTriangle className="w-3 h-3" /> {t('noPackage')}
                               </span>
                             )}
+                            {p.arrivedAt && !p.done && (
+                              <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 flex items-center gap-1 w-fit animate-pulse">
+                                ⏱️ {Math.floor((new Date().getTime() - new Date(p.arrivedAt).getTime()) / 60000)} min
+                              </span>
+                            )}
                           </div>
                           <div className="flex flex-col items-end">
                             <span className="text-xs font-black text-emerald-400">
@@ -2012,10 +2054,24 @@ export default function App() {
               )}>
                 <button 
                   onClick={() => reoptimizeRoute(deliveries, true)}
-                  className="w-full py-4 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-2xl font-black text-sm tracking-tight transition-all shadow-xl shadow-[#00ff41]/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                  className="w-full py-4 bg-[#00ff41] hover:bg-[#00ff41]/90 text-[#0a192f] rounded-2xl font-black text-sm tracking-tight transition-all shadow-xl shadow-[#00ff41]/20 active:scale-[0.98] flex items-center justify-center gap-2 mb-3"
                 >
                   <RotateCcw className="w-4 h-4" /> {language === 'pt' ? 'RECALCULAR PELA MINHA POSIÇÃO' : 'RECALCULATE FROM MY POSITION'}
                 </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button 
+                    onClick={exportToCSV}
+                    className="py-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-[10px] uppercase tracking-widest border border-slate-700 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                  >
+                    <Download className="w-4 h-4" /> {t('exportRoute')}
+                  </button>
+                  <button 
+                    onClick={exportToCircuit}
+                    className="py-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-[10px] uppercase tracking-widest border border-slate-700 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                  >
+                    <Package className="w-4 h-4" /> {t('exportCircuit')}
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>
