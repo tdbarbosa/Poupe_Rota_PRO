@@ -43,7 +43,10 @@ import {
   ChevronRight,
   Download,
   Route,
-  Clock
+  Clock,
+  Crown,
+  Globe,
+  Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -96,6 +99,7 @@ export default function App() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [myLocation, setMyLocation] = useState<Location | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [mergingId, setMergingId] = useState<number | null>(null);
   const [isDrawerExpanded, setIsDrawerExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
@@ -247,6 +251,11 @@ export default function App() {
       voiceInput: "Entrada por Voz",
       barcodeScan: "Escanear Código",
       typeAddress: "Digitar Endereço",
+      accountType: "Tipo de conta",
+      proBenefits: "Benefícios PRO",
+      preferences: "Preferências",
+      darkMode: "Modo escuro",
+      lightMode: "Modo claro",
       swipeToFinish: "Deslize para finalizar",
       nextStopLabel: "Próxima Parada",
       prevStopLabel: "Parada Anterior"
@@ -353,6 +362,11 @@ export default function App() {
       voiceInput: "Voice Input",
       barcodeScan: "Scan Barcode",
       typeAddress: "Type Address",
+      accountType: "Account type",
+      proBenefits: "PRO benefits",
+      preferences: "Preferences",
+      darkMode: "Dark mode",
+      lightMode: "Light mode",
       swipeToFinish: "Swipe to finish",
       nextStopLabel: "Next Stop",
       prevStopLabel: "Previous Stop"
