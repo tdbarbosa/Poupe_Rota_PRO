@@ -42,11 +42,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Route
+  Route,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { routingService, KalmanFilter } from './services/routingService';
+
+import { saveAs } from 'file-saver';
+import Fuse from 'fuse.js';
+import * as pdfjs from 'pdfjs-dist';
+
+// Set PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
 // Types
 interface Delivery {
@@ -70,6 +78,10 @@ interface Delivery {
   arrivedAt?: string;
   stopDuration?: number; // in seconds
   packageId?: string;
+  cep?: string;
+  quadra?: string;
+  lote?: string;
+  side?: 'even' | 'odd' | 'unknown';
 }
 
 interface Location {
@@ -79,6 +91,7 @@ interface Location {
 
 export default function App() {
   // State
+  const [isMobile, setIsMobile] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [myLocation, setMyLocation] = useState<Location | null>(null);
@@ -87,12 +100,34 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const [manualAddr, setManualAddr] = useState("");
-  const [isMobile, setIsMobile] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 10000);
+    return () => clearInterval(timer);
+  }, []);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [mapStyle, setMapStyle] = useState<'dark' | 'light' | 'satellite'>('dark');
   const [popupDelivery, setPopupDelivery] = useState<Delivery | null>(null);
   const [isPro, setIsPro] = useState(false);
-  const [mergingId, setMergingId] = useState<number | null>(null);
+  // Adaptive Routing: Proactive recalculation
+  useEffect(() => {
+    if (!myLocation || deliveries.length === 0) return;
+
+    const nextPending = deliveries.find(d => !d.done);
+    if (!nextPending) return;
+
+    const dist = routingService.getDistance(myLocation, { lat: nextPending.lat, lon: nextPending.lon });
+    
+    // If user is moving away from the next stop or significantly off-track
+    // We can suggest a recalculation if they are more than 2km away from the next stop
+    // and they haven't arrived yet.
+    if (dist > 2000 && !nextPending.arrivedAt) {
+      // Logic for proactive suggestion could go here
+      // For now, we'll just log it or show a subtle hint
+      console.log("Significant deviation detected. Distance to next stop:", dist);
+    }
+  }, [myLocation, deliveries]);
   const [isClassifierReady, setIsClassifierReady] = useState(false);
   const [navTarget, setNavTarget] = useState<Delivery | null>(null);
   const [editingDelivery, setEditingDelivery] = useState<Delivery | null>(null);
@@ -115,8 +150,8 @@ export default function App() {
       upgrade: "Upgrade Agora",
       adText: "Remova anúncios e tenha rotas ilimitadas com o RouteMaster PRO!",
       noRoute: "Nenhuma rota ativa",
-      importPlanilha: "Importe uma planilha Excel (.xlsx) para começar a otimizar suas entregas.",
-      importBtn: "📂 IMPORTAR PLANILHA",
+      importPlanilha: "Importe uma planilha Excel (.xlsx) ou arquivo PDF para começar a otimizar suas entregas.",
+      importBtn: "📂 IMPORTAR ARQUIVO",
       totalStops: "Total de Paradas",
       totalDeliveries: "Total de Entregas",
       pending: "Pendentes",
@@ -166,6 +201,7 @@ export default function App() {
       estCompletion: "Estimativa de Término",
       noPackageId: "Sem número",
       exportCircuit: "Exportar para Circuit",
+      exportCSV: "Exportar Rota (CSV)",
       routeNamePlaceholder: "Ex: Rota dia 09 - Senador Canedo",
       confirmMove: "Deseja alterar a posição deste pino?",
       moveInstructions: "O pino foi desbloqueado. Agora você pode arrastá-lo para a nova posição.",
@@ -206,6 +242,7 @@ export default function App() {
       verifyPayment: "Verificar Pagamento",
       proStatus: "Status PRO",
       exportRoute: "Exportar Rota",
+      export: "Exportar",
       manualEntry: "Entrada Manual",
       voiceInput: "Entrada por Voz",
       barcodeScan: "Escanear Código",
@@ -219,8 +256,8 @@ export default function App() {
       upgrade: "Upgrade Now",
       adText: "Remove ads and get unlimited routes with RouteMaster PRO!",
       noRoute: "No active route",
-      importPlanilha: "Import an Excel spreadsheet (.xlsx) to start optimizing your deliveries.",
-      importBtn: "📂 IMPORT SPREADSHEET",
+      importPlanilha: "Import an Excel spreadsheet (.xlsx) or PDF file to start optimizing your deliveries.",
+      importBtn: "📂 IMPORT FILE",
       totalStops: "Total Stops",
       totalDeliveries: "Total Deliveries",
       pending: "Pending",
@@ -270,6 +307,7 @@ export default function App() {
       estCompletion: "Est. Completion",
       noPackageId: "No number",
       exportCircuit: "Export to Circuit",
+      exportCSV: "Export Route (CSV)",
       routeNamePlaceholder: "Ex: Route Day 09 - Downtown",
       confirmMove: "Do you want to change this pin's position?",
       moveInstructions: "The pin is now unlocked. You can drag it to the new position.",
@@ -310,6 +348,7 @@ export default function App() {
       verifyPayment: "Verify Payment",
       proStatus: "PRO Status",
       exportRoute: "Export Route",
+      export: "Export",
       manualEntry: "Manual Entry",
       voiceInput: "Voice Input",
       barcodeScan: "Scan Barcode",
@@ -674,6 +713,26 @@ export default function App() {
     updateMarkers(deliveries, activeId);
   }, [deliveries, activeId, myLocation]);
 
+  const extractAddressDetails = (addr: string) => {
+    const cepMatch = addr.match(/\d{5}-?\d{3}/);
+    const quadraMatch = addr.match(/qd\.?\s*(\d+|[A-Z]+)/i);
+    const loteMatch = addr.match(/lt\.?\s*(\d+|[A-Z]+)/i);
+    const numMatch = addr.match(/(\d+)/);
+    
+    let side: 'even' | 'odd' | 'unknown' = 'unknown';
+    if (numMatch) {
+      const num = parseInt(numMatch[0]);
+      side = num % 2 === 0 ? 'even' : 'odd';
+    }
+
+    return {
+      cep: cepMatch ? cepMatch[0] : undefined,
+      quadra: quadraMatch ? quadraMatch[1] : undefined,
+      lote: loteMatch ? loteMatch[1] : undefined,
+      side
+    };
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -683,6 +742,79 @@ export default function App() {
     setRouteName(fileName);
 
     const reader = new FileReader();
+
+    if (file.type === "application/pdf") {
+      reader.onload = async (event) => {
+        try {
+          const typedarray = new Uint8Array(event.target?.result as ArrayBuffer);
+          const pdf = await pdfjs.getDocument(typedarray).promise;
+          let fullText = "";
+          
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const strings = content.items.map((item: any) => (item as any).str);
+            fullText += strings.join(" ") + "\n";
+          }
+
+          const lines = fullText.split("\n");
+          const extractedAddresses: string[] = [];
+          const addrRegex = /(Rua|Av|Avenida|Logradouro|Travessa|Praça|Al\.|Alameda)\s+[^,]+,\s*\d+/gi;
+          
+          lines.forEach(line => {
+            const matches = line.match(addrRegex);
+            if (matches) {
+              matches.forEach(m => extractedAddresses.push(m.trim()));
+            }
+          });
+
+          if (extractedAddresses.length === 0) {
+            alert(language === 'pt' ? "Nenhum endereço encontrado no PDF. Tente usar uma planilha." : "No addresses found in PDF. Try using a spreadsheet.");
+            return;
+          }
+
+          const newDeliveries: Delivery[] = await Promise.all(extractedAddresses.map(async (addr, i) => {
+            const bairro = "";
+            let finalLat = 0, finalLon = 0;
+            
+            if (orsKey) {
+              const geo = await routingService.geocode(`${addr}, ${bairro}`);
+              if (geo) {
+                finalLat = geo.lat;
+                finalLon = geo.lon;
+              }
+            }
+
+            const type = await classifyAddress(addr);
+            const details = extractAddressDetails(addr);
+
+            return {
+              id: Date.now() + i,
+              lat: finalLat,
+              lon: finalLon,
+              addr,
+              bairro,
+              done: false,
+              type,
+              quality: 'incomplete',
+              verificationNotes: ["Importado de PDF"],
+              ...details
+            };
+          }));
+
+          const validDeliveries = newDeliveries.filter(d => d.lat !== 0);
+          setDeliveries(prev => [...prev, ...validDeliveries]);
+          reoptimizeRoute([...deliveries, ...validDeliveries], true);
+          
+        } catch (error) {
+          console.error("PDF Error:", error);
+          alert("Erro ao ler PDF.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
     reader.onload = async (evt) => {
       try {
         const bstr = evt.target?.result;
@@ -720,6 +852,7 @@ export default function App() {
         const rawAddr = getVal(addrFields) || getVal(nameFields) || r.Endereco || r.address || r.ENDERECO || "Endereço não informado";
         const rawName = getVal(nameFields) || r.Nome || r.Cliente || r.CLIENTE;
         const packageId = getVal(packageFields);
+        console.log(`Mapping row ${i}: packageId=${packageId} from keys:`, Object.keys(r));
         
         const { cleanAddr, extractedNotes } = cleanAddressAndExtractNotes(String(rawAddr));
         const addr = normalizeAddress(cleanAddr);
@@ -740,6 +873,7 @@ export default function App() {
         const type = await classifyAddress(String(addr));
         const condoName = type === 'condominio' ? extractCondoName(String(addr)) : undefined;
         const verification = verifyAddress(String(addr), String(bairro));
+        const details = extractAddressDetails(String(addr));
 
         return {
           id: i,
@@ -754,7 +888,8 @@ export default function App() {
           quality: verification.quality,
           verificationNotes: verification.notes,
           notes: extractedNotes || undefined,
-          packageId: packageId ? String(packageId) : undefined
+          packageId: packageId ? String(packageId) : undefined,
+          ...details
         };
       }));
       
@@ -792,27 +927,51 @@ export default function App() {
   const exportToCSV = () => {
     if (deliveries.length === 0) return;
     
-    const headers = ["Order", "Address", "Bairro", "Name", "Notes", "Status"];
+    const headers = ["Order", "Address", "Bairro", "Name", "Notes", "Status", "CEP", "Quadra", "Lote"];
     const rows = deliveries.map(d => [
       d.order || "",
       d.addr,
       d.bairro,
       d.name || "",
       d.notes || "",
-      d.done ? "Done" : "Pending"
+      d.done ? "Done" : "Pending",
+      d.cep || "",
+      d.quadra || "",
+      d.lote || ""
     ]);
     
-    let csvContent = "data:text/csv;charset=utf-8," 
-      + headers.join(",") + "\n"
-      + rows.map(e => e.join(",")).join("\n");
+    let csvContent = "\uFEFF" + headers.join(",") + "\n"
+      + rows.map(e => e.map(val => `"${val}"`).join(",")).join("\n");
       
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `route_export_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    saveAs(blob, `route_export_${new Date().getTime()}.csv`);
+  };
+
+  const exportToXLSX = () => {
+    if (deliveries.length === 0) return;
+
+    const data = deliveries.map(d => ({
+      "Ordem": d.order || "",
+      "Endereço": d.addr,
+      "Bairro": d.bairro,
+      "Cliente": d.name || "",
+      "Observações": d.notes || "",
+      "Status": d.done ? "Concluído" : "Pendente",
+      "CEP": d.cep || "",
+      "Quadra": d.quadra || "",
+      "Lote": d.lote || "",
+      "Chegada": d.arrivedAt || "",
+      "Conclusão": d.completedAt || "",
+      "Duração (seg)": d.stopDuration || ""
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Rota");
+    
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `route_export_${new Date().getTime()}.xlsx`);
   };
   const groupNearbyDeliveries = () => {
     if (deliveries.length < 2) return;
@@ -884,15 +1043,26 @@ export default function App() {
 
     const optimizedClusterOrder = routingService.optimizeLocal(startPos, clusterCentroids);
 
-    // 3. Flatten optimized clusters back to deliveries
+    // 3. Flatten optimized clusters back to deliveries with internal sorting
     const sortedPends: Delivery[] = [];
     optimizedClusterOrder.forEach(clusterIdx => {
-      sortedPends.push(...clusters[clusterIdx]);
+      const cluster = clusters[clusterIdx];
+      
+      // Internal sorting within cluster: CEP -> Quadra -> Lote -> Side
+      cluster.sort((a, b) => {
+        if (a.cep && b.cep && a.cep !== b.cep) return a.cep.localeCompare(b.cep);
+        if (a.quadra && b.quadra && a.quadra !== b.quadra) return a.quadra.localeCompare(b.quadra);
+        if (a.lote && b.lote && a.lote !== b.lote) return a.lote.localeCompare(b.lote);
+        if (a.side && b.side && a.side !== b.side) return a.side === 'even' ? -1 : 1;
+        return 0;
+      });
+      
+      sortedPends.push(...cluster);
     });
 
-    const newOrder = [...sortedPends, ...dones].map((d, i) => ({ ...d, order: i + 1 }));
-    
-    setDeliveries(newOrder);
+    const final = [...dones, ...sortedPends].map((d, i) => ({ ...d, order: i + 1 }));
+    setDeliveries(final);
+    updateMarkers(final, activeId);
   };
 
   // Update Map Markers and Route Polyline
@@ -1270,7 +1440,7 @@ export default function App() {
     )}>
       {/* Top Bar */}
       <header className={cn(
-        "h-16 px-4 flex items-center justify-between z-[2000] border-b shadow-sm shrink-0",
+        "relative h-16 px-4 flex items-center justify-between z-[2000] border-b shadow-sm shrink-0",
         theme === 'dark' ? "bg-[#0a192f]/95 border-slate-800 backdrop-blur-xl" : "bg-white/95 border-slate-200 backdrop-blur-xl"
       )}>
         <div className="flex items-center gap-3">
@@ -1287,89 +1457,19 @@ export default function App() {
                 {isPro ? "PRO" : "FREE"}
               </span>
             </h1>
-            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1 truncate max-w-[120px]">
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1 truncate max-w-[150px]">
               {routeName}
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => {
-              setIsDrawerExpanded(true);
-              setTimeout(() => {
-                const searchInput = document.getElementById('drawer-search');
-                if (searchInput) searchInput.focus();
-              }, 300);
-            }}
-            className={cn(
-              "p-2.5 rounded-2xl transition-all active:scale-90 shadow-sm border",
-              theme === 'dark' ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-900"
-            )}
-          >
-            <Search className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => setIsManualEntryOpen(true)}
-            className={cn(
-              "p-2.5 rounded-2xl transition-all active:scale-90 shadow-sm border",
-              theme === 'dark' ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-900"
-            )}
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className={cn(
-              "p-2.5 rounded-2xl transition-all active:scale-90 shadow-sm border",
-              theme === 'dark' ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-900"
-            )}
-          >
-            <Settings className="w-5 h-5" />
-          </button>
-        </div>
       </header>
 
-      {/* Bottom Navigation Menu */}
-      <nav className={cn(
-        "h-20 px-6 flex items-center justify-between z-[2000] border-t shrink-0",
-        theme === 'dark' ? "bg-[#0a192f]/95 border-slate-800 backdrop-blur-xl" : "bg-white/95 border-slate-200 backdrop-blur-xl"
-      )}>
-        <button 
-          onClick={() => setIsDrawerExpanded(true)}
-          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
-        >
-          <Package className="w-6 h-6" />
-          <span className="text-[9px] font-bold uppercase tracking-widest">{t('data')}</span>
-        </button>
-        <button 
-          onClick={centralizeView}
-          className="w-14 h-14 -mt-10 bg-[#00ff41] rounded-full flex items-center justify-center shadow-2xl shadow-[#00ff41]/40 border-4 border-[#0a192f] active:scale-90 transition-all"
-        >
-          <Target className="w-7 h-7 text-[#0a192f]" />
-        </button>
-        <button 
-          onClick={() => setIsSettingsOpen(true)}
-          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
-        >
-          <Settings className="w-6 h-6" />
-          <span className="text-[9px] font-bold uppercase tracking-widest">{t('settings')}</span>
-        </button>
-      </nav>
+
         {/* Map Container */}
         <div id="map" className="absolute inset-0 z-10" />
 
         {/* Map Controls */}
-        <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
-          <button 
-            onClick={centralizeView}
-            className={cn(
-              "w-12 h-12 rounded-xl shadow-lg flex items-center justify-center transition-all active:scale-95",
-              theme === 'dark' ? "bg-slate-800 border border-slate-700 text-slate-100" : "bg-white border border-slate-200 text-slate-900"
-            )}
-          >
-            <Target className="w-6 h-6" />
-          </button>
-          
+        <div className="absolute right-4 top-20 z-[1000] flex flex-col gap-2">
           <div className={cn(
             "p-1 rounded-xl shadow-lg flex flex-col gap-1",
             theme === 'dark' ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"
@@ -1394,132 +1494,6 @@ export default function App() {
             </button>
           </div>
         </div>
-
-        {/* Carousel of Pending Deliveries (Tinder Style) */}
-        {!isInternalNavigating && deliveries.some(d => !d.done) && (
-          <div className="absolute bottom-32 left-0 right-0 z-[1600] px-4 flex justify-center items-center gap-2 pointer-events-none">
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                const pends = deliveries.filter(d => !d.done);
-                const currentIdx = pends.findIndex(d => d.id === activeId);
-                const prevIdx = (currentIdx - 1 + pends.length) % pends.length;
-                focusDelivery(pends[prevIdx].id);
-              }}
-              className="p-2 bg-slate-900/80 backdrop-blur-md text-slate-400 rounded-full border border-slate-800 pointer-events-auto active:scale-95 transition-all"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <div className="w-full max-w-sm pointer-events-auto overflow-x-auto flex gap-4 no-scrollbar pb-4 snap-x snap-mandatory">
-              {deliveries.filter(d => !d.done).map((p) => (
-                <motion.div
-                  key={p.id}
-                  layout
-                  drag="x"
-                  dragConstraints={{ left: 0, right: 0 }}
-                  onDragEnd={(_, info) => {
-                    if (info.offset.x > 100) {
-                      // Swipe right - mark as done
-                      toggleStatus(p.id);
-                    } else if (info.offset.x < -100) {
-                      // Swipe left - skip/next
-                      const pending = deliveries.filter(x => !x.done && x.id !== p.id);
-                      if (pending.length > 0) {
-                        focusDelivery(pending[0].id);
-                      }
-                    }
-                  }}
-                  onClick={() => focusDelivery(p.id)}
-                  className={cn(
-                    "min-w-[85vw] md:min-w-[320px] p-5 rounded-[32px] shadow-2xl border-2 flex flex-col gap-3 transition-all cursor-grab active:cursor-grabbing snap-center",
-                    activeId === p.id 
-                      ? "border-[#00ff41] bg-slate-900/95 backdrop-blur-xl" 
-                      : theme === 'dark' ? "border-slate-800 bg-slate-900/80 backdrop-blur-md" : "border-slate-100 bg-white/80 backdrop-blur-md"
-                  )}
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2.5 py-1 rounded-full">
-                        {p.bairro}
-                      </span>
-                      <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-full uppercase">
-                        {t('packageOrder')} #{p.order}
-                      </span>
-                    </div>
-                    {p.packageId ? (
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        📦 {p.packageId}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> {t('noPackage')}
-                      </span>
-                    )}
-                  </div>
-                  <h4 className="text-base font-black leading-tight line-clamp-2">{p.addr}</h4>
-                  
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="flex flex-col">
-                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{t('estCompletionTime')}</span>
-                      <span className="text-xs font-black text-emerald-400">{calculateEstCompletion(deliveries.filter(d => !d.done).length)}</span>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      {p.arrivedAt ? (
-                        <div className="flex flex-col items-end">
-                          <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">{t('stopTime')}</span>
-                          <span className="text-xs font-black text-blue-400 animate-pulse">
-                            {Math.floor((new Date().getTime() - new Date(p.arrivedAt).getTime()) / 60000)} min
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 text-slate-500">
-                          <Footprints className="w-3 h-3" />
-                          <span className="text-[10px] font-bold">3 min</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 mt-2">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNavTarget(p);
-                      }}
-                      className="flex-1 py-3.5 bg-[#00ff41] text-[#0a192f] rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-lg shadow-[#00ff41]/20 active:scale-95 transition-all"
-                    >
-                      {t('navigate')}
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleStatus(p.id);
-                      }}
-                      className="px-4 bg-slate-800 text-slate-400 rounded-2xl hover:text-white transition-all active:scale-95"
-                    >
-                      <CheckCircle2 className="w-6 h-6" />
-                    </button>
-                  </div>
-                  <div className="text-center">
-                    <span className="text-[8px] font-bold text-slate-600 uppercase tracking-[0.2em]">{t('swipeToFinish')}</span>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                const pends = deliveries.filter(d => !d.done);
-                const currentIdx = pends.findIndex(d => d.id === activeId);
-                const nextIdx = (currentIdx + 1) % pends.length;
-                focusDelivery(pends[nextIdx].id);
-              }}
-              className="p-2 bg-slate-900/80 backdrop-blur-md text-slate-400 rounded-full border border-slate-800 pointer-events-auto active:scale-95 transition-all"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-        )}
 
         {/* Centered Info Balloon (Popup Modal) */}
         <AnimatePresence>
@@ -1582,6 +1556,15 @@ export default function App() {
                     </div>
                   )}
 
+                  {popupDelivery.arrivedAt && !popupDelivery.done && (
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 flex items-center justify-between">
+                      <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">{t('stopTime')}</p>
+                      <p className="text-sm font-black text-blue-500 animate-pulse">
+                        ⏱️ {Math.floor((currentTime.getTime() - new Date(popupDelivery.arrivedAt).getTime()) / 60000)} min
+                      </p>
+                    </div>
+                  )}
+
                   {popupDelivery.done && (
                     <div className="grid grid-cols-2 gap-2">
                       <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3">
@@ -1608,15 +1591,27 @@ export default function App() {
                       {t('navigate')}
                     </button>
                     {!popupDelivery.done && (
-                      <button 
-                        onClick={() => {
-                          toggleStatus(popupDelivery.id);
-                          setPopupDelivery(null);
-                        }}
-                        className="p-4 bg-slate-800 text-slate-400 rounded-[24px] hover:text-white transition-all active:scale-95"
-                      >
-                        <CheckCircle2 className="w-6 h-6" />
-                      </button>
+                      <div className="flex gap-2 flex-1">
+                        {!popupDelivery.arrivedAt && (
+                          <button 
+                            onClick={() => {
+                              markArrived(popupDelivery.id);
+                            }}
+                            className="flex-1 py-4 bg-blue-500/10 text-blue-400 rounded-[24px] text-xs font-black uppercase tracking-widest border border-blue-500/20 active:scale-95 transition-all"
+                          >
+                            {t('arrived')}
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => {
+                            toggleStatus(popupDelivery.id);
+                            setPopupDelivery(null);
+                          }}
+                          className="p-4 bg-slate-800 text-slate-400 rounded-[24px] hover:text-white transition-all active:scale-95"
+                        >
+                          <CheckCircle2 className="w-6 h-6" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1627,13 +1622,14 @@ export default function App() {
           <motion.div
             initial={false}
             animate={{ 
-              height: isMobile ? (isDrawerExpanded ? '85vh' : '15vh') : '100%',
-              width: isMobile ? '100%' : '400px'
+              height: isMobile ? (isDrawerExpanded ? 'calc(100vh - 120px)' : '15vh') : '100%',
+              width: isMobile ? '100%' : '400px',
+              bottom: isMobile ? '80px' : 'auto'
             }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             className={cn(
               "z-[1500] flex flex-col shadow-2xl transition-colors min-h-0",
-              isMobile ? "fixed bottom-0 left-0 right-0 rounded-t-[2.5rem] border-t" : "relative border-l",
+              isMobile ? "fixed left-0 right-0 rounded-t-[2.5rem] border-t" : "relative border-l",
               theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
             )}
           >
@@ -1702,6 +1698,7 @@ export default function App() {
                     )}>
                       <Search className="w-4 h-4 text-slate-500" />
                       <input 
+                        id="drawer-search"
                         type="text"
                         placeholder={language === 'pt' ? 'Buscar pacote ou endereço...' : 'Search package or address...'}
                         value={searchQuery}
@@ -1768,6 +1765,12 @@ export default function App() {
                           className="text-xs font-bold text-[#00ff41] hover:underline flex items-center gap-1"
                         >
                           <RotateCcw className="w-3 h-3" /> {t('recalculate')}
+                        </button>
+                        <button 
+                          onClick={exportToXLSX}
+                          className="text-xs font-bold text-emerald-400 hover:underline flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" /> {language === 'pt' ? 'Exportar XLSX' : 'Export XLSX'}
                         </button>
                         <button 
                           onClick={exportToCSV}
@@ -2058,18 +2061,24 @@ export default function App() {
                 >
                   <RotateCcw className="w-4 h-4" /> {language === 'pt' ? 'RECALCULAR PELA MINHA POSIÇÃO' : 'RECALCULATE FROM MY POSITION'}
                 </button>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <button 
+                    onClick={exportToXLSX}
+                    className="py-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-[10px] uppercase tracking-widest border border-slate-700 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                  >
+                    <Download className="w-4 h-4" /> XLSX
+                  </button>
                   <button 
                     onClick={exportToCSV}
                     className="py-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-[10px] uppercase tracking-widest border border-slate-700 flex items-center justify-center gap-2 active:scale-95 transition-all"
                   >
-                    <Download className="w-4 h-4" /> {t('exportRoute')}
+                    <Download className="w-4 h-4" /> CSV
                   </button>
                   <button 
                     onClick={exportToCircuit}
                     className="py-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-[10px] uppercase tracking-widest border border-slate-700 flex items-center justify-center gap-2 active:scale-95 transition-all"
                   >
-                    <Package className="w-4 h-4" /> {t('exportCircuit')}
+                    <Package className="w-4 h-4" /> Circuit
                   </button>
                 </div>
               </div>
@@ -2339,6 +2348,30 @@ export default function App() {
                     <RotateCcw className="w-5 h-5" />
                     <span className="font-semibold">{t('clearRoute')}</span>
                   </button>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button 
+                      onClick={exportToXLSX}
+                      className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-900/30 hover:bg-slate-900/50 border border-slate-700/30 transition-all"
+                    >
+                      <Download className="w-5 h-5 text-emerald-400" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">XLSX</span>
+                    </button>
+                    <button 
+                      onClick={exportToCSV}
+                      className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-900/30 hover:bg-slate-900/50 border border-slate-700/30 transition-all"
+                    >
+                      <Download className="w-5 h-5 text-blue-400" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">CSV</span>
+                    </button>
+                    <button 
+                      onClick={exportToCircuit}
+                      className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-900/30 hover:bg-slate-900/50 border border-slate-700/30 transition-all"
+                    >
+                      <Share2 className="w-5 h-5 text-orange-400" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Circuit</span>
+                    </button>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <button 
@@ -2777,6 +2810,191 @@ export default function App() {
             </div>
           )}
         </AnimatePresence>
+
+        {/* Carousel of Pending Deliveries (Tinder Style) - Moved to end for visibility */}
+        {!isInternalNavigating && deliveries.some(d => !d.done) && (
+          <div className="fixed bottom-40 left-0 right-0 z-[3000] px-4 flex justify-center items-center gap-2 pointer-events-none">
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const pends = deliveries.filter(d => !d.done);
+                const currentIdx = pends.findIndex(d => d.id === activeId);
+                const prevIdx = (currentIdx - 1 + pends.length) % pends.length;
+                focusDelivery(pends[prevIdx].id);
+              }}
+              className="p-2 bg-slate-900/80 backdrop-blur-md text-slate-400 rounded-full border border-slate-800 pointer-events-auto active:scale-95 transition-all"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="w-full max-w-sm pointer-events-auto overflow-x-auto flex gap-4 no-scrollbar pb-4 snap-x snap-mandatory">
+              {deliveries.filter(d => !d.done).map((p) => (
+                <motion.div
+                  key={p.id}
+                  layout
+                  drag="x"
+                  dragConstraints={{ left: 0, right: 0 }}
+                  onDragEnd={(_, info) => {
+                    if (info.offset.x > 100) {
+                      // Swipe right - mark as done
+                      toggleStatus(p.id);
+                    } else if (info.offset.x < -100) {
+                      // Swipe left - skip/next
+                      const pending = deliveries.filter(x => !x.done && x.id !== p.id);
+                      if (pending.length > 0) {
+                        focusDelivery(pending[0].id);
+                      }
+                    }
+                  }}
+                  onClick={() => focusDelivery(p.id)}
+                  className={cn(
+                    "min-w-[85vw] md:min-w-[320px] p-5 rounded-[32px] shadow-2xl border-2 flex flex-col gap-3 transition-all cursor-grab active:cursor-grabbing snap-center",
+                    activeId === p.id 
+                      ? "border-[#00ff41] bg-slate-900/95 backdrop-blur-xl" 
+                      : theme === 'dark' ? "border-slate-800 bg-slate-900/80 backdrop-blur-md" : "border-slate-100 bg-white/80 backdrop-blur-md"
+                  )}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-tighter text-orange-500 bg-orange-500/10 px-2.5 py-1 rounded-full">
+                        {p.bairro}
+                      </span>
+                      <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-full uppercase">
+                        {t('packageOrder')} #{p.order}
+                      </span>
+                    </div>
+                    {p.packageId ? (
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        📦 {p.packageId}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> {t('noPackage')}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-base font-black leading-tight line-clamp-2">{p.addr}</h4>
+                  
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{t('estCompletionTime')}</span>
+                      <span className="text-xs font-black text-emerald-400">{calculateEstCompletion(deliveries.filter(d => !d.done).length)}</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      {p.arrivedAt ? (
+                        <div className="flex flex-col items-end">
+                          <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">{t('stopTime')}</span>
+                          <span className="text-xs font-black text-blue-400 animate-pulse">
+                            ⏱️ {Math.floor((currentTime.getTime() - new Date(p.arrivedAt).getTime()) / 60000)} min
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-slate-500">
+                          <Footprints className="w-3 h-3" />
+                          <span className="text-[10px] font-bold">3 min</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-2">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNavTarget(p);
+                      }}
+                      className="flex-1 py-3.5 bg-[#00ff41] text-[#0a192f] rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-lg shadow-[#00ff41]/20 active:scale-95 transition-all"
+                    >
+                      {t('navigate')}
+                    </button>
+                    {!p.arrivedAt && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          markArrived(p.id);
+                        }}
+                        className="px-4 bg-blue-500/10 text-blue-400 rounded-2xl hover:bg-blue-500/20 transition-all active:scale-95 border border-blue-500/20 flex items-center justify-center"
+                        title={t('arrived')}
+                      >
+                        <Clock className="w-6 h-6" />
+                      </button>
+                    )}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleStatus(p.id);
+                      }}
+                      className="px-4 bg-slate-800 text-slate-400 rounded-2xl hover:text-white transition-all active:scale-95"
+                    >
+                      <CheckCircle2 className="w-6 h-6" />
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const pends = deliveries.filter(d => !d.done);
+                const currentIdx = pends.findIndex(d => d.id === activeId);
+                const nextIdx = (currentIdx + 1) % pends.length;
+                focusDelivery(pends[nextIdx].id);
+              }}
+              className="p-2 bg-slate-900/80 backdrop-blur-md text-slate-400 rounded-full border border-slate-800 pointer-events-auto active:scale-95 transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+      {/* Bottom Navigation Menu */}
+      <nav className={cn(
+        "fixed bottom-0 left-0 right-0 h-20 px-6 flex items-center justify-between z-[2000] border-t",
+        theme === 'dark' ? "bg-[#0a192f]/95 border-slate-800 backdrop-blur-xl" : "bg-white/95 border-slate-200 backdrop-blur-xl"
+      )}>
+        <button 
+          onClick={() => {
+            setIsDrawerExpanded(true);
+            setTimeout(() => {
+              const searchInput = document.getElementById('drawer-search');
+              if (searchInput) searchInput.focus();
+            }, 300);
+          }}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
+        >
+          <Search className="w-6 h-6" />
+          <span className="text-[9px] font-bold uppercase tracking-widest">{language === 'pt' ? 'Busca' : 'Search'}</span>
+        </button>
+
+        <button 
+          onClick={() => setIsDrawerExpanded(true)}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
+        >
+          <Package className="w-6 h-6" />
+          <span className="text-[9px] font-bold uppercase tracking-widest">{t('data')}</span>
+        </button>
+
+        <button 
+          onClick={centralizeView}
+          className="w-14 h-14 -mt-10 bg-[#00ff41] rounded-full flex items-center justify-center shadow-2xl shadow-[#00ff41]/40 border-4 border-[#0a192f] active:scale-90 transition-all"
+        >
+          <Target className="w-7 h-7 text-[#0a192f]" />
+        </button>
+
+        <button 
+          onClick={() => setIsManualEntryOpen(true)}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
+        >
+          <Plus className="w-6 h-6" />
+          <span className="text-[9px] font-bold uppercase tracking-widest">{language === 'pt' ? 'Novo' : 'New'}</span>
+        </button>
+
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="flex flex-col items-center gap-1 text-slate-400 hover:text-[#00ff41] transition-colors"
+        >
+          <Settings className="w-6 h-6" />
+          <span className="text-[9px] font-bold uppercase tracking-widest">{t('settings')}</span>
+        </button>
+      </nav>
       </div>
     );
   }
